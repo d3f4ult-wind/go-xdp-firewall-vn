@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>XDP Firewall</title>
+
+<!-- 
+    Sử dụng Chart.js để vẽ biểu đồ tài nguyên hệ thống. 
+    Lý do: Thư viện này nhẹ, render bằng Canvas nên hiệu năng tốt cho việc cập nhật dữ liệu liên tục.
+-->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+/**
+ * =================================================================================
+ * PHẦN GIAO DIỆN (CSS)
+ * PHONG CÁCH: Dark Mode (Slate/Zinc) thường dùng trong các công cụ giám sát hệ thống.
+ * TẠI SAO: Font 'monospace' tạo cảm giác kỹ thuật (technical), phù hợp với hạ tầng mạng.
+ * =================================================================================
+ */
+body {
+  font-family: monospace;
+  background: #0f172a; /* Màu nền xanh đậm tối */
+  color: #e5e7eb;
+  margin: 20px;
+}
+
+h1 { color: #38bdf8; }
+
+.panel {
+  border: 1px solid #334155;
+  padding: 12px;
+  margin-bottom: 20px;
+  border-radius: 6px;
+}
+
+button {
+  background: #2563eb;
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+input, select {
+  background: #020617;
+  color: #e5e7eb;
+  border: 1px solid #334155;
+  padding: 4px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  border: 1px solid #334155;
+  padding: 6px;
+}
+
+/* Bố cục biểu đồ cạnh nhau trên màn hình lớn */
+.chart-row {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+}
+
+.chart-box {
+  flex: 1;                 
+  height: 220px;           
+  background: #020617;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+canvas {
+  background: #020617;
+  padding: 10px;
+  border-radius: 6px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>XDP Firewall Dashboard</h1>
+
+<!-- BẢNG TRẠNG THÁI: Hiển thị nhanh tình trạng của Kernel Driver -->
+<div class="panel">
+  <h3>Firewall Status</h3>
+  <p><strong>XDP Attached:</strong> <span id="xdpStatus">?</span></p>
+  <p>
+    <strong>Default Action:</strong>
+    <span id="defaultAction" style="font-weight:bold;">?</span>
+  </p>
+  <button onclick="toggleDefaultAction()">Toggle Default Action</button>
+</div>
+
+<!-- BIỂU ĐỒ HỆ THỐNG: Theo dõi tải của CPU/RAM khi Firewall xử lý traffic -->
+<div class="panel">
+  <h3>System Metrics</h3>
+  <div class="chart-row">
+    <div class="chart-box">
+      <canvas id="cpuChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <canvas id="memChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- FORM THÊM LUẬT: Nơi người dùng nhập dải mạng cần chặn/cho qua -->
+<div class="panel">
+  <h3>Add Rule</h3>
+  Subnet <input id="subnet" placeholder="192.168.1.0/24">
+  Port <input id="port" type="number">
+  Proto
+  <select id="proto">
+    <option value="1">ICMP</option>
+    <option value="6">TCP</option>
+  <option value="17">UDP</option>
+  </select>
+  Action
+  <select id="action">
+    <option value="DROP">DROP</option>
+    <option value="PASS">PASS</option>
+  </select>
+  <button onclick="addRule()">Add</button>
+</div>
+
+<!-- DANH SÁCH LUẬT: Hiển thị các luật hiện có trong eBPF Maps -->
+<div class="panel">
+  <h3>Rules</h3>
+  <table>
+    <thead>
+    <tr>
+      <th>Source</th>
+      <th>Protocol</th>
+      <th>Port</th>
+      <th>Action</th>
+      <th></th>
+    </tr>
+    </thead>
+    <tbody id="rules"></tbody>
+  </table>
+</div>
+
+<script>
+/**
+ * =================================================================================
+ * PHẦN LOGIC (JAVASCRIPT)
+ * =================================================================================
+ */
+const api = ""; // Để trống vì Dashboard được phục vụ chung host với Flask
+
+// # BƯỚC 1: KHỞI TẠO BIỂU ĐỒ (Chart.js)
+// Sử dụng 'tension: 0.2' để làm mượt đường kẻ biểu đồ.
+// 'maintainAspectRatio: false' cho phép biểu đồ lấp đầy container linh hoạt.
+const cpuChart = new Chart(document.getElementById("cpuChart"), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'CPU Usage (%)',
+      data: [],
+      borderColor: "#38bdf8",
+      tension: 0.2
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false
+  }
+});
+
+const memChart = new Chart(document.getElementById("memChart"), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Memory Usage (MB)',
+      data: [],
+      borderColor: "#22c55e",
+      tension: 0.2
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false
+  }
+});
+
+// # BƯỚC 2: CẬP NHẬT CHỈ SỐ SỨC KHỎE (Polling)
+// CẠM BẪY: Việc gọi API liên tục có thể gây tải cho Flask nếu không cẩn thận.
+// Ở đây dùng 2 giây (2000ms) là mức cân bằng giữa tính thời gian thực và hiệu năng.
+function updateHealth() {
+  fetch(api + "/health")
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById("xdpStatus").innerText =
+        data.xdp_attached ? "YES" : "NO";
+
+      const now = new Date().toLocaleTimeString();
+
+      // Thêm dữ liệu mới vào cuối mảng
+      cpuChart.data.labels.push(now);
+      cpuChart.data.datasets[0].data.push(data.cpu_percent);
+
+      memChart.data.labels.push(now);
+      memChart.data.datasets[0].data.push(data.memory_mb);
+
+      // CẠM BẪY: Nếu không giới hạn số lượng điểm ảnh, trình duyệt sẽ bị lag do quá nhiều data.
+      // Giải pháp: Xóa điểm dữ liệu cũ nhất khi vượt quá 20 điểm (Sliding Window).
+      if (cpuChart.data.labels.length > 20) {
+        cpuChart.data.labels.shift();
+        cpuChart.data.datasets[0].data.shift();
+        memChart.data.labels.shift();
+        memChart.data.datasets[0].data.shift();
+      }
+
+      cpuChart.update();
+      memChart.update();
+    });
+}
+
+// # BƯỚC 3: QUẢN LÝ DEFAULT ACTION
+function fetchDefaultAction() {
+  fetch(api + "/default")
+    .then(r => r.json())
+    .then(data => {
+      const action = data.action;
+      const el = document.getElementById("defaultAction");
+      el.innerText = action;
+      // Đổi màu chữ theo hành động để dễ quan sát (Đỏ = Nguy hiểm/Chặn, Xanh = Cho qua)
+      el.style.color = (action === "DROP") ? "#ef4444" : "#22c55e";
+    });
+}
+
+function toggleDefaultAction() {
+  fetch(api + "/default", {
+    method: "POST"
+  }).then(fetchDefaultAction);
+}
+
+// # BƯỚC 4: QUẢN LÝ DANH SÁCH LUẬT (CRUD)
+function protoToText(proto) {
+  // Chuyển đổi mã IANA Protocol sang tên thân thiện.
+  switch (proto) {
+    case 1:  return "ICMP";
+    case 6:  return "TCP";
+    case 17: return "UDP";
+    default: return proto;
+  }
+}
+
+function loadRules() {
+  fetch(api + "/rules")
+    .then(r => r.json())
+    .then(rules => {
+      const tbody = document.getElementById("rules");
+      tbody.innerHTML = "";
+
+      rules.forEach(r => {
+        const tr = document.createElement("tr");
+        // Dùng Template Literals để tạo dòng trong bảng, sạch sẽ và dễ đọc hơn cộng chuỗi.
+        tr.innerHTML = `
+          <td>${r.subnet}</td>
+          <td>${protoToText(r.proto)}</td>
+          <td>${r.proto === 1 ? "-" : r.port}</td>
+          <td style="color:${r.action === "DROP" ? "#ef4444" : "#22c55e"}">
+            ${r.action}
+          </td>
+          <td>
+            <button onclick='delRule(${JSON.stringify(r)})'>Del</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      console.error("Failed to load rules:", err);
+    });
+}
+
+function addRule() {
+  fetch(api + "/rules", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      subnet: document.getElementById("subnet").value,
+      port: Number(document.getElementById("port").value),
+      proto: Number(document.getElementById("proto").value),
+      action: document.getElementById("action").value
+    })
+  }).then(loadRules); // Tải lại bảng sau khi thêm thành công
+}
+
+function delRule(r) {
+  fetch(api + "/rules", {
+    method: "DELETE",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(r)
+  }).then(loadRules);
+}
+
+// # BƯỚC 5: TỐI ƯU HÓA UX (User Experience)
+// Nếu chọn ICMP (Ping), ta vô hiệu hóa ô nhập Port vì ICMP không sử dụng Port.
+document.getElementById("proto").addEventListener("change", function () {
+  const portInput = document.getElementById("port");
+  if (this.value === "1") {
+    portInput.value = 0;
+    portInput.disabled = true;
+  } else {
+    portInput.disabled = false;
+  }
+});
+
+// ----------- KHỞI CHẠY (Initialization) -----------
+fetchDefaultAction();
+loadRules();
+updateHealth();
+
+// Tự động làm mới dữ liệu
+setInterval(updateHealth, 2000);
+setInterval(fetchDefaultAction, 3000); // Hành động mặc định ít thay đổi hơn nên polling chậm hơn
+</script>
+
+</body>
+</html>

@@ -1,0 +1,31 @@
+# =================================================================================
+# FILE: init.yaml
+# MÔ TẢ: Cấu hình khởi tạo cho Hanselgray XDP Firewall.
+# LUỒNG HOẠT ĐỘNG: 
+#   1. File này được 'config.go' đọc khi ứng dụng bắt đầu chạy.
+#   2. Các thông số tại đây quyết định firewall sẽ "gác cổng" ở đâu và như thế nào.
+#   3. Các luật (rules) định nghĩa sẵn tại đây sẽ được nạp ngay vào Kernel Maps.
+# =================================================================================
+
+# # TÊN GIAO DIỆN MẠNG (Network Interface)
+# Tại sao: Đây là nơi chương trình XDP sẽ được "gắn" (attach) vào.
+# Cạm bẫy: Phải chính xác 100% tên card mạng (dùng lệnh 'ip link' để kiểm tra). 
+# Nếu sai tên, chương trình Go sẽ báo lỗi "interface not found" và thoát.
+interface: ens33
+
+# # CHẾ ĐỘ NẠP XDP (XDP Mode)
+# Các giá trị hợp lệ:
+#   - 'native': Hiệu năng cao nhất, chạy trực tiếp trong Driver. Yêu cầu phần cứng hỗ trợ.
+#   - 'skb' (hoặc 'generic'): Chạy ở tầng phần mềm. Chậm hơn nhưng tương thích mọi card mạng.
+#   - 'auto': Hệ thống sẽ cố gắng thử 'native' trước, nếu không được sẽ lùi về 'skb'.
+mode: auto
+
+# # HÀNH ĐỘNG MẶC ĐỊNH (Default Action)
+# Tại sao: Đây là chính sách cho các gói tin KHÔNG khớp với bất kỳ luật nào trong danh sách.
+# Giá trị:
+#   - 1: XDP_DROP (Chặn sạch - Chế độ bảo mật cao Whitelist)
+#   - 2: XDP_PASS (Cho qua hết - Chế độ giám sát Blacklist)
+# Cạm bẫy: Nếu bạn đặt là 1 mà chưa cấu hình luật cho phép SSH (Port 22), 
+# bạn sẽ bị mất kết nối tới server ngay khi firewall khởi động!
+default_action: 2
+
