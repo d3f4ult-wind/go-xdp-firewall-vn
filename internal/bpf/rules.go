@@ -34,10 +34,10 @@ import (
 func (fw *Firewall) lookupPolicyID(ip net.IP, masklen uint32) (uint32, error) {
 		key := xdp_packet_filterIpv4LpmKey{
 				Prefixlen: masklen,
-				// CẠM BẪY: eBPF Kernel mong muốn IP ở dạng Host Byte Order khi so sánh LPM.
-				// binary.BigEndian.Uint32 giúp chuyển đổi slice byte của Go sang số uint32.
-				Addr:      binary.BigEndian.Uint32(ip.To4()),
 		}
+		// Sửa lỗi: eBPF bây giờ dùng mảng [4]byte cho LPM thay vì uint32
+		// nên không dùng BigEndian.Uint32 nữa, mà copy trực tiếp từ slice To4()
+		copy(key.Addr[:], ip.To4())
 
 		var policyID uint32
 		err := fw.ipTrie.Lookup(&key, &policyID)
@@ -110,8 +110,8 @@ func (fw *Firewall) AddRule(r Rule) error {
 				// Chuẩn bị key cho Kernel LPM
 				lpmKey := xdp_packet_filterIpv4LpmKey{
 						Prefixlen: r.Masklen,
-						Addr:      binary.BigEndian.Uint32(network.To4()),
 				}
+				copy(lpmKey.Addr[:], network.To4())
 
 				// # BƯỚC 4: Đẩy dải mạng xuống Kernel LPM Map
 				// ebpf.UpdateNoExist: Đảm bảo không ghi đè nếu có sự cố trùng lặp ngoài ý muốn.
@@ -170,7 +170,7 @@ func (fw *Firewall) ListRules() ([]Rule, error) {
 				}
 
 				ip := make(net.IP, 4)
-				binary.BigEndian.PutUint32(ip, prefix.Addr)
+				copy(ip, prefix.Addr[:])
 
 				rules = append(rules, Rule{
 						Addr:     ip,

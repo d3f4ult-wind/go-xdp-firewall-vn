@@ -25,7 +25,7 @@
 // CẠM BẪY: prefixlen phải nằm ngay trước dữ liệu IP để eBPF Verifier hiểu đây là LPM key.
 struct ipv4_lpm_key {
     __u32 prefixlen; // Độ dài prefix (vd: 24 cho /24)
-    __u32 addr;      // Địa chỉ IPv4
+    __u8 addr[4];    // Địa chỉ IPv4 (dạng mảng byte để giữ đúng thứ tự Network Byte Order)
 };
 
 // Cấu trúc định danh luật (Rule ID)
@@ -40,6 +40,7 @@ struct rule_id {
  * Tại sao dùng BPF_MAP_TYPE_LPM_TRIE? 
  * -> Cho phép tìm kiếm IP theo dải (Subnet). Ví dụ: gói tin từ 192.168.1.5 
  *    sẽ khớp với luật của dải 192.168.1.0/24.
+ * -> Nếu muốn chặn theo IP tĩnh, chỉ cần đổi prefixlen thành 32 (IPv4). Ví dụ 192.168.1.5/32 sẽ chỉ khớp với đúng IP đó.
  */
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
@@ -174,13 +175,13 @@ int xdp_packet_filter(struct xdp_md *ctx){
     }
 
     // # BƯỚC 4: Tìm kiếm Subnet (LPM Matching)
-    // Chuyển IP nguồn sang host order để tra cứu
-    __u32 src = bpf_ntohl(iph->saddr);
-
-    struct ipv4_lpm_key subnet_key = {
-        .prefixlen = 32, // Ban đầu tìm kiếm chính xác IP (Host match)
-        .addr = src 
-    };
+    // KHÔNG chuyển đổi IP nguồn sang host order nữa.
+    // Cứ giữ nguyên Network Byte Order để LPM so sánh đúng chuẩn mạng.
+    struct ipv4_lpm_key subnet_key = {};
+    subnet_key.prefixlen = 32; // Ban đầu tìm kiếm chính xác IP (Host match)
+    
+    // Ép kiểu mảng addr thành __u32 pointer để gán toàn bộ 4 byte cùng lúc cho tối ưu
+    *(__u32 *)subnet_key.addr = iph->saddr;
 
     // eBPF kernel sẽ tự thực hiện giải thuật Trie để tìm dải mạng phù hợp nhất (Longest Prefix)
     __u32 *subnet_id = bpf_map_lookup_elem(&subnet_map, &subnet_key);
