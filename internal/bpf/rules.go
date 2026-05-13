@@ -3,7 +3,6 @@ package bpf
 import ( 
 	"net"
 	"fmt"
-	"encoding/binary"
 	"github.com/cilium/ebpf"
 )
 
