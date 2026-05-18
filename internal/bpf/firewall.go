@@ -13,6 +13,7 @@ package bpf
 import (
 	"github.com/cilium/ebpf"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -55,6 +56,9 @@ type Firewall struct {
 	ipTrie        *ebpf.Map
 	policies      *ebpf.Map
 	defaultAction *ebpf.Map
+
+	// mu: Bảo vệ các map trong bộ nhớ đệm (User-space) khỏi lỗi concurrent map read/write
+	mu sync.RWMutex
 
 	// ---- Control-plane state (Bộ nhớ đệm User-space) ----
 	// TẠI SAO: Kernel eBPF Map rất khó để duyệt (iterate) và tìm kiếm ngược.

@@ -97,6 +97,7 @@ func (fw *Firewall) AddRule(r Rule) error {
 		// Tạo chuỗi prefix làm key để cache ở User-space (vd: "192.168.1.0/24")
 		prefix := fmt.Sprintf("%s/%d", network.String(), r.Masklen)
 
+		fw.mu.Lock()
 		// # BƯỚC 3: Quản lý PolicyID
 		// Kiểm tra xem Subnet này đã có ID chưa (tránh tạo ID trùng lặp cho cùng một dải mạng)
 		policyID, exists := fw.prefixToID[prefix]
@@ -115,6 +116,7 @@ func (fw *Firewall) AddRule(r Rule) error {
 				// # BƯỚC 4: Đẩy dải mạng xuống Kernel LPM Map
 				// ebpf.UpdateNoExist: Đảm bảo không ghi đè nếu có sự cố trùng lặp ngoài ý muốn.
 				if err := fw.ipTrie.Update(&lpmKey, &policyID, ebpf.UpdateNoExist); err != nil {
+						fw.mu.Unlock()
 						return fmt.Errorf("failed to insert prefix into LPM trie: %w", err)
 				}
 
@@ -122,6 +124,7 @@ func (fw *Firewall) AddRule(r Rule) error {
 				fw.prefixToID[prefix] = policyID
 				fw.idToPrefix[policyID] = lpmKey
 		}
+		fw.mu.Unlock()
 
 		// # BƯỚC 5: Cập nhật luật cụ thể (Port/Proto/Action) xuống Kernel Hash Map
 		return fw.updateRule(policyID, r)
@@ -136,7 +139,10 @@ func (fw *Firewall) DeleteRule(r Rule) error {
 		network := r.Addr.Mask(mask)
 		prefix := fmt.Sprintf("%s/%d", network.String(), r.Masklen)
 
+		fw.mu.RLock()
 		policyID, exists := fw.prefixToID[prefix]
+		fw.mu.RUnlock()
+		
 		if !exists {
 				return fmt.Errorf("policyID matching subnet %s/%d not found", network.String(), r.Masklen)
 		}
@@ -159,6 +165,9 @@ func (fw *Firewall) ListRules() ([]Rule, error) {
 		iter := fw.policies.Iterate()
 		var key xdp_packet_filterRuleId
 		var action uint32
+
+		fw.mu.RLock()
+		defer fw.mu.RUnlock()
 
 		for iter.Next(&key, &action) {
 				// # BƯỚC 2: Ánh xạ ngược từ SubnetID sang IP/Mask
