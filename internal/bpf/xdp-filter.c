@@ -36,6 +36,42 @@ struct rule_id {
 };
 
 /**
+ * Cấu trúc lưu trữ số lượng gói tin (count) và thời gian bắt đầu tính (window_start_ns)
+ * cho mỗi địa chỉ IP nguồn.
+ */
+struct rl_metrics {
+    __u64 window_start_ns;
+    __u32 count;
+    __u32 pad;
+};
+
+/**
+ * # RATE LIMIT MAP
+ * LƯU Ý CHO GO-SIDE: Map này là PERCPU. Khi Go-side đọc map này,
+ * nó sẽ nhận được một slice/array chứa các value của từng CPU core.
+ * Cần cộng tổng giá trị count của tất cả các CPU lại để ra tổng ước lượng
+ * số packet/s của một IP.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
+    __type(key, __u32);
+    __type(value, struct rl_metrics);
+    __uint(max_entries, 65536);
+} rate_limit_map SEC(".maps");
+
+/**
+ * # RATE LIMIT CONFIG MAP
+ * Index 0: PPS_THRESHOLD (mặc định: 1000)
+ * Index 1: TIME_WINDOW_NS (mặc định: 1000000000 - 1s)
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, __u32);
+    __uint(max_entries, 2);
+} rl_config_map SEC(".maps");
+
+/**
  * # BẢN ĐỒ SUBNET (LPM Trie)
  * Tại sao dùng BPF_MAP_TYPE_LPM_TRIE? 
  * -> Cho phép tìm kiếm IP theo dải (Subnet). Ví dụ: gói tin từ 192.168.1.5 
@@ -172,6 +208,38 @@ int xdp_packet_filter(struct xdp_md *ctx){
     // # BƯỚC 3: Phân giải IP Header (L3)
     if(parse_iphdr(&nh, data_end, &iph) == -1){
         return XDP_DROP;
+    }
+
+    // # BƯỚC 3.5: Rate Limiting
+    __u32 src_ip = iph->saddr;
+    __u64 now = bpf_ktime_get_ns();
+    
+    __u32 config_key_thresh = 0;
+    __u32 *thresh_ptr = bpf_map_lookup_elem(&rl_config_map, &config_key_thresh);
+    __u32 threshold = (thresh_ptr && *thresh_ptr > 0) ? *thresh_ptr : 1000;
+    
+    __u32 config_key_window = 1;
+    __u32 *window_ptr = bpf_map_lookup_elem(&rl_config_map, &config_key_window);
+    __u64 window = (window_ptr && *window_ptr > 0) ? (__u64)(*window_ptr) : 1000000000ULL;
+
+    struct rl_metrics *metrics = bpf_map_lookup_elem(&rate_limit_map, &src_ip);
+    if (metrics) {
+        if (now - metrics->window_start_ns <= window) {
+            metrics->count += 1;
+            if (metrics->count > threshold) {
+                return XDP_DROP;
+            }
+        } else {
+            metrics->count = 1;
+            metrics->window_start_ns = now;
+        }
+    } else {
+        struct rl_metrics new_metrics = {
+            .window_start_ns = now,
+            .count = 1,
+            .pad = 0
+        };
+        bpf_map_update_elem(&rate_limit_map, &src_ip, &new_metrics, BPF_ANY);
     }
 
     // # BƯỚC 4: Tìm kiếm Subnet (LPM Matching)
