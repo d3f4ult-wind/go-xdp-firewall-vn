@@ -11,7 +11,7 @@
 # Tại sao: Đây là nơi chương trình XDP sẽ được "gắn" (attach) vào.
 # Cạm bẫy: Phải chính xác 100% tên card mạng (dùng lệnh 'ip link' để kiểm tra). 
 # Nếu sai tên, chương trình Go sẽ báo lỗi "interface not found" và thoát.
-interface: ens33
+interface: enp0s8
 
 # # CHẾ ĐỘ NẠP XDP (XDP Mode)
 # Các giá trị hợp lệ:

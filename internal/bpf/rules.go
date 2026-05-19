@@ -82,72 +82,108 @@ func (fw *Firewall) deleteRule(policyID uint32, r Rule) error {
  * # HÀM AddRule: Thêm một luật mới vào hệ thống
  */
 func (fw *Firewall) AddRule(r Rule) error {
+        fmt.Println("--------------------------------------------------")
+        fmt.Println("[AddRule] called")
+        fmt.Printf("[AddRule] Rule: Addr=%s Masklen=%d Port=%d Proto=%d Action=%d\n",
+                r.Addr, r.Masklen, r.Port, r.Proto, r.Action)
+
 		// # BƯỚC 1: Kiểm tra tính hợp lệ của dữ liệu đầu vào
-		if r.Addr == nil || r.Addr.To4() == nil {
-				return fmt.Errorf("only IPv4 is supported")
-		}
-		if r.Masklen > 32 {
-				return fmt.Errorf("invalid mask length %d", r.Masklen)
-		}
+        if r.Addr == nil || r.Addr.To4() == nil {
+                fmt.Println("[AddRule] ERROR: not IPv4")
+                return fmt.Errorf("only IPv4 is supported")
+        }
+        if r.Masklen > 32 {
+                fmt.Println("[AddRule] ERROR: invalid masklen")
+                return fmt.Errorf("invalid mask length %d", r.Masklen)
+        }
 
 		// # BƯỚC 2: Chuẩn hóa địa chỉ mạng (Canonical Address)
 		// TẠI SAO: Nếu người dùng nhập 192.168.1.5/24, ta phải đưa về 192.168.1.0/24.
 		// Nếu không chuẩn hóa, LPM Trie có thể hoạt động không chính xác hoặc tạo ra các entry rác.
-		mask := net.CIDRMask(int(r.Masklen), 32)
-		network := r.Addr.Mask(mask)
+        mask := net.CIDRMask(int(r.Masklen), 32)
+        network := r.Addr.Mask(mask)
+        fmt.Printf("[AddRule] Canonical network: %s/%d\n", network.String(), r.Masklen)
 
 		// Tạo chuỗi prefix làm key để cache ở User-space (vd: "192.168.1.0/24")
-		prefix := fmt.Sprintf("%s/%d", network.String(), r.Masklen)
+        prefix := fmt.Sprintf("%s/%d", network.String(), r.Masklen)
+        fmt.Printf("[AddRule] Prefix string: %s\n", prefix)
 
-		fw.mu.Lock()
+        fw.mu.Lock()
 		// # BƯỚC 3: Quản lý PolicyID
 		// Kiểm tra xem Subnet này đã có ID chưa (tránh tạo ID trùng lặp cho cùng một dải mạng)
-		policyID, exists := fw.prefixToID[prefix]
+        policyID, exists := fw.prefixToID[prefix]
+        fmt.Printf("[AddRule] prefix exists? %v\n", exists)
 
-		if !exists {
+        if !exists {
 				// Cấp phát ID mới nếu dải mạng lần đầu xuất hiện
-				policyID = fw.nextID
-				fw.nextID++
+                policyID = fw.nextID
+                fw.nextID++
+                fmt.Printf("[AddRule] Allocated new policyID = %d\n", policyID)
 
 				// Chuẩn bị key cho Kernel LPM
-				lpmKey := xdp_packet_filterIpv4LpmKey{
-						Prefixlen: r.Masklen,
-				}
-				copy(lpmKey.Addr[:], network.To4())
+                lpmKey := xdp_packet_filterIpv4LpmKey{
+                        Prefixlen: r.Masklen,
+                }
+                copy(lpmKey.Addr[:], network.To4())
+                addrUint32 := binary.BigEndian.Uint32(lpmKey.Addr[:])
+                fmt.Printf("[AddRule] LPM key: Prefixlen=%d Addr(hex)=0x%08x Addr(uint32)=%d\n",
+                        lpmKey.Prefixlen, addrUint32, addrUint32)
 
 				// # BƯỚC 4: Đẩy dải mạng xuống Kernel LPM Map
 				// ebpf.UpdateNoExist: Đảm bảo không ghi đè nếu có sự cố trùng lặp ngoài ý muốn.
-				if err := fw.ipTrie.Update(&lpmKey, &policyID, ebpf.UpdateNoExist); err != nil {
-						fw.mu.Unlock()
-						return fmt.Errorf("failed to insert prefix into LPM trie: %w", err)
-				}
+                if err := fw.ipTrie.Update(&lpmKey, &policyID, ebpf.UpdateNoExist); err != nil {
+                        fw.mu.Unlock()
+                        fmt.Println("[AddRule] ERROR: ipTrie.Update failed")
+                        return fmt.Errorf("failed to insert prefix into LPM trie: %w", err)
+                }
+
+                fmt.Println("[AddRule] Inserted into kernel LPM trie")
 
 				// Lưu vào cache của Firewall để phục vụ tra cứu nhanh và liệt kê luật sau này
-				fw.prefixToID[prefix] = policyID
-				fw.idToPrefix[policyID] = lpmKey
-		}
-		fw.mu.Unlock()
+                fw.prefixToID[prefix] = policyID
+                fw.idToPrefix[policyID] = lpmKey
+                fmt.Println("[AddRule] Updated control-plane caches")
+        } else {
+                fmt.Printf("[AddRule] Using existing policyID = %d\n", policyID)
+        }
+        fw.mu.Unlock()
 
 		// # BƯỚC 5: Cập nhật luật cụ thể (Port/Proto/Action) xuống Kernel Hash Map
-		fmt.Printf("[DEBUG] Đang thêm luật: Subnet=%s/%d, Proto=%d, Port=%d, Action=%d, PolicyID=%d\n",
-				network.String(), r.Masklen, r.Proto, r.Port, r.Action, policyID)
-		return fw.updateRule(policyID, r)
+        fmt.Println("[AddRule] Installing L4 rule")
+        err := fw.updateRule(policyID, r)
+        if err != nil {
+                fmt.Println("[AddRule] ERROR: updateRule failed")
+        } else {
+                fmt.Println("[AddRule] updateRule succeeded")
+        }
+
+        fmt.Println("--------------------------------------------------")
+        return err
 }
 
 /**
  * # HÀM DeleteRule: Xóa luật
  */
 func (fw *Firewall) DeleteRule(r Rule) error {
+        fmt.Println("--------------------------------------------------")
+        fmt.Println("[DeleteRule] called")
+        fmt.Printf("[DeleteRule] Rule: Addr=%s Masklen=%d Port=%d Proto=%d\n",
+                r.Addr, r.Masklen, r.Port, r.Proto)
+
 		// # BƯỚC 1: Tìm PolicyID tương ứng với Subnet
 		mask := net.CIDRMask(int(r.Masklen), 32)
 		network := r.Addr.Mask(mask)
 		prefix := fmt.Sprintf("%s/%d", network.String(), r.Masklen)
+        fmt.Printf("[DeleteRule] Canonical prefix: %s\n", prefix)
 
 		fw.mu.RLock()
 		policyID, exists := fw.prefixToID[prefix]
 		fw.mu.RUnlock()
+        fmt.Printf("[DeleteRule] prefix exists? %v, policyID=%d\n", exists, policyID)
 		
 		if !exists {
+                fmt.Println("[DeleteRule] ERROR: prefix not found in cache")
+                fmt.Println("--------------------------------------------------")
 				return fmt.Errorf("policyID matching subnet %s/%d not found", network.String(), r.Masklen)
 		}
 
@@ -155,9 +191,15 @@ func (fw *Firewall) DeleteRule(r Rule) error {
 		// CẠM BẪY: Hiện tại hàm này chỉ xóa luật L4. Nếu đây là luật cuối cùng của Subnet đó,
 		// ta vẫn chưa xóa Subnet khỏi ipTrie. Trong một hệ thống thực tế, bạn cần thêm 
 		// cơ chế đếm (reference counting) để dọn dẹp ipTrie khi không còn luật nào dùng ID đó.
-		fmt.Printf("[DEBUG] Đang xóa luật: Subnet=%s/%d, Proto=%d, Port=%d, PolicyID=%d\n",
-				network.String(), r.Masklen, r.Proto, r.Port, policyID)
-		return fw.deleteRule(policyID, r)
+        fmt.Println("[DeleteRule] Removing L4 rule from kernel")
+		err := fw.deleteRule(policyID, r)
+        if err != nil {
+                fmt.Println("[DeleteRule] ERROR: deleteRule failed")
+        } else {
+                fmt.Println("[DeleteRule] deleteRule succeeded")
+        }
+        fmt.Println("--------------------------------------------------")
+        return err
 }
 
 /**
@@ -208,9 +250,17 @@ func (fw *Firewall) ListRules() ([]Rule, error) {
  * Tương tác với Array Map (chỉ có 1 phần tử tại index 0).
  */
 func (fw *Firewall) SetDefaultBehaviour(action uint32) error {
-		fmt.Printf("[DEBUG] Đang thiết lập Default Behaviour = %d\n", action)
+        fmt.Println("--------------------------------------------------")
+        fmt.Printf("[SetDefaultBehaviour] called with action=%d\n", action)
 		var key uint32 = 0
-		return fw.defaultAction.Update(&key, &action, ebpf.UpdateAny)
+		err := fw.defaultAction.Update(&key, &action, ebpf.UpdateAny)
+        if err != nil {
+            fmt.Println("[SetDefaultBehaviour] ERROR: defaultAction.Update failed")
+        } else {
+            fmt.Println("[SetDefaultBehaviour] defaultAction.Update succeeded")
+        }
+        fmt.Println("--------------------------------------------------")
+        return err
 }
 
 func (fw *Firewall) GetDefaultBehaviour() (uint32, error) {
