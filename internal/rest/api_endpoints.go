@@ -257,6 +257,75 @@ func (s *Server) setDefault(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// -----------------------------------
+// --- Rate Limiting APIs          ---
+// -----------------------------------
+
+func (s *Server) handleRateLimitIPs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	ips, err := s.fw.ListRateLimitedIPs()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ips)
+}
+
+type RateLimitConfigRequest struct {
+	PPS      uint32 `json:"pps"`
+	WindowMs uint32 `json:"window_ms"`
+}
+
+func (s *Server) handleRateLimitConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		pps, err1 := s.fw.GetRateLimitThreshold()
+		win, err2 := s.fw.GetRateLimitWindow()
+		if err1 != nil {
+			http.Error(w, err1.Error(), 500)
+			return
+		}
+		if err2 != nil {
+			http.Error(w, err2.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(RateLimitConfigRequest{
+			PPS:      pps,
+			WindowMs: win,
+		})
+
+	case http.MethodPost:
+		var req RateLimitConfigRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", 400)
+			return
+		}
+
+		if err := s.fw.SetRateLimitThreshold(req.PPS); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		if err := s.fw.SetRateLimitWindow(req.WindowMs); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 // ------------------------
 // --- Health check API ---
 // ------------------------

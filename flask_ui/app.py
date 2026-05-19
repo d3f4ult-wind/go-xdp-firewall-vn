@@ -89,6 +89,11 @@ def index():
     """Phục vụ file HTML tĩnh cho giao diện người dùng."""
     return send_from_directory("static", "index.html")
 
+@app.route("/ratelimit")
+def ratelimit_page():
+    """Phục vụ file HTML cấu hình Rate Limiting."""
+    return send_from_directory("static", "ratelimit.html")
+
 @app.route("/rules", methods=["GET"])
 def list_rules():
     """Lấy danh sách các luật hiện có từ Kernel thông qua Go API."""
@@ -143,6 +148,35 @@ def delete_rule():
 
     except requests.RequestException:
         return jsonify({"error": "Firewall API unreachable"}), 503
+
+@app.route("/ratelimit/ips", methods=["GET"])
+def get_ratelimit_ips():
+    """Lấy danh sách các IP đang bị rate limit."""
+    data, status = call_firewall_api("GET", "/ratelimit/ips")
+    return jsonify(data), status
+
+@app.route("/ratelimit/config", methods=["GET", "POST"])
+def ratelimit_config():
+    """Lấy hoặc cập nhật cấu hình Rate Limiting."""
+    try:
+        if request.method == "GET":
+            r = requests.get(f"{FIREWALL_API}/ratelimit/config", timeout=2)
+        else:
+            r = requests.post(
+                f"{FIREWALL_API}/ratelimit/config",
+                json=request.json,
+                timeout=2
+            )
+        
+        # Forward y nguyên JSON và status code về UI
+        return jsonify(r.json()), r.status_code
+
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "Firewall API unreachable"}), 503
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "Firewall API timeout"}), 504
+    except ValueError:
+        return jsonify({"error": "Invalid response from Firewall API"}), 502
 
 @app.route("/health")
 def health():

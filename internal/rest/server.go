@@ -53,8 +53,11 @@ func New(fw *bpf.Firewall, bpfHandle *bpf.BPF) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("/rules", s.handleRules)
 	s.mux.HandleFunc("/default", s.handleDefault)
-	// s.mux.HandleFunc("/stats", s.handleStats) // Dự phòng cho tính năng đếm gói tin sau này
 	s.mux.HandleFunc("/health", s.handleHealth)
+	
+	// Rate Limiting APIs
+	s.mux.HandleFunc("/ratelimit/ips", s.handleRateLimitIPs)
+	s.mux.HandleFunc("/ratelimit/config", s.handleRateLimitConfig)
 }
 
 /**

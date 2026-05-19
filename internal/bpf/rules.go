@@ -3,6 +3,8 @@ package bpf
 import ( 
 	"net"
 	"fmt"
+	"time"
+	"encoding/binary"
 	"github.com/cilium/ebpf"
 )
 
@@ -224,4 +226,101 @@ func (fw *Firewall) Flush() error {
 		// TODO: Thực hiện vòng lặp xóa tất cả các key trong ipTrie và policies.
 		// Cần cẩn thận với race-condition khi đang flush mà có gói tin đi vào.
 		return nil
+}
+
+// -----------------------------------------------------------
+// --- Rate Limiting APIs ---
+// -----------------------------------------------------------
+
+func (fw *Firewall) ListRateLimitedIPs() ([]RateLimitEntry, error) {
+	var threshold uint32
+	var configKey uint32 = 0
+	if err := fw.rlConfigMap.Lookup(&configKey, &threshold); err != nil || threshold == 0 {
+		threshold = 1000 // Fallback giống hệt C
+	}
+
+	var entries []RateLimitEntry
+	var key uint32
+	// per-CPU values: Slice của cấu trúc đã ánh xạ
+	var perCPUValues []RlMetrics
+
+	iter := fw.rateLimitMap.Iterate()
+	for iter.Next(&key, &perCPUValues) {
+		var totalCount uint64
+		var windowStart uint64
+
+		for _, cpuVal := range perCPUValues {
+			totalCount += uint64(cpuVal.Count)
+			// Lấy window start mới nhất làm mốc
+			if cpuVal.WindowStartNs > windowStart {
+				windowStart = cpuVal.WindowStartNs
+			}
+		}
+
+		if totalCount > uint64(threshold) {
+			// Chuyển key uint32 -> string (Network byte order)
+			ipBytes := make([]byte, 4)
+			binary.LittleEndian.PutUint32(ipBytes, key)
+			ip := net.IPv4(ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3])
+
+			entries = append(entries, RateLimitEntry{
+				SrcIP:       ip.String(),
+				TotalCount:  totalCount,
+				WindowStart: time.Unix(0, int64(windowStart)),
+			})
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("lỗi khi duyệt rate_limit_map: %w", err)
+	}
+
+	return entries, nil
+}
+
+func (fw *Firewall) SetRateLimitThreshold(pps uint32) error {
+	if pps == 0 {
+		return fmt.Errorf("ngưỡng PPS không được bằng 0")
+	}
+	var configKey uint32 = 0
+	if err := fw.rlConfigMap.Update(&configKey, &pps, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("lỗi khi cập nhật rl_config_map: %w", err)
+	}
+	return nil
+}
+
+func (fw *Firewall) GetRateLimitThreshold() (uint32, error) {
+	var configKey uint32 = 0
+	var threshold uint32
+	if err := fw.rlConfigMap.Lookup(&configKey, &threshold); err != nil {
+		return 0, fmt.Errorf("lỗi khi đọc rl_config_map: %w", err)
+	}
+	if threshold == 0 {
+		return 1000, nil
+	}
+	return threshold, nil
+}
+
+func (fw *Firewall) SetRateLimitWindow(ms uint32) error {
+	if ms == 0 {
+		return fmt.Errorf("thời gian window không được bằng 0")
+	}
+	ns := ms * 1_000_000
+	var configKey uint32 = 1
+	if err := fw.rlConfigMap.Update(&configKey, &ns, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("lỗi khi cập nhật rl_config_map: %w", err)
+	}
+	return nil
+}
+
+func (fw *Firewall) GetRateLimitWindow() (uint32, error) {
+	var configKey uint32 = 1
+	var ns uint32
+	if err := fw.rlConfigMap.Lookup(&configKey, &ns); err != nil {
+		return 0, fmt.Errorf("lỗi khi đọc rl_config_map: %w", err)
+	}
+	if ns == 0 {
+		return 1000, nil
+	}
+	return ns / 1_000_000, nil
 }

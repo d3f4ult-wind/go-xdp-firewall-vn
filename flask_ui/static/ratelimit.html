@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>XDP Firewall - Rate Limit</title>
+
+<style>
+/**
+ * =================================================================================
+ * PHẦN GIAO DIỆN (CSS)
+ * =================================================================================
+ */
+body {
+  font-family: monospace;
+  background: #0f172a;
+  color: #e5e7eb;
+  margin: 20px;
+}
+
+h1 { color: #38bdf8; }
+
+.panel {
+  border: 1px solid #334155;
+  padding: 12px;
+  margin-bottom: 20px;
+  border-radius: 6px;
+  background: #1e293b;
+}
+
+button {
+  background: #2563eb;
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+input {
+  background: #020617;
+  color: #e5e7eb;
+  border: 1px solid #334155;
+  padding: 4px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  border: 1px solid #334155;
+  padding: 6px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>XDP Firewall Dashboard</h1>
+
+<div style="margin-bottom: 20px; padding: 10px; background: #1e293b; border-radius: 6px; border: 1px solid #334155;">
+  <a href="/" style="color: #94a3b8; text-decoration: none; margin-right: 15px;">📊 Bảng điều khiển (Dashboard)</a>
+  <a href="/ratelimit" style="color: #38bdf8; text-decoration: none; font-weight: bold;">🛡️ Cấu hình Ngưỡng (Rate Limit)</a>
+</div>
+
+<!-- CẤU HÌNH RATE LIMIT -->
+<div class="panel">
+  <h3>Cấu hình Ngưỡng (XDP Rate Limit)</h3>
+  PPS Threshold <input id="rlPps" type="number" placeholder="1000">
+  Time Window (ms) <input id="rlWindow" type="number" placeholder="1000">
+  <button onclick="saveRateLimitConfig()">Lưu cấu hình</button>
+  <span id="rlMsg" style="margin-left: 10px; color: #22c55e;"></span>
+</div>
+
+<!-- IP BỊ CHẶN TỰ ĐỘNG -->
+<div class="panel">
+  <h3>Auto-Blocked IPs <span style="font-size: 0.6em; background: #ef4444; padding: 2px 6px; border-radius: 4px;">Tự động (XDP Rate Limit)</span></h3>
+  <table>
+    <thead>
+    <tr>
+      <th>Source IP</th>
+      <th>Packet Count</th>
+      <th>Thời điểm phát hiện</th>
+    </tr>
+    </thead>
+    <tbody id="rlIps"></tbody>
+  </table>
+  <p id="rlEmptyMsg" style="color: #94a3b8; display: none; text-align: center; margin-top: 20px;">Không có IP nào đang bị rate-limit tự động</p>
+</div>
+
+<script>
+/**
+ * =================================================================================
+ * PHẦN LOGIC (JAVASCRIPT)
+ * =================================================================================
+ */
+const api = "";
+
+function loadRateLimitConfig() {
+  fetch(api + "/ratelimit/config")
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById("rlPps").value = data.pps;
+      document.getElementById("rlWindow").value = data.window_ms;
+    })
+    .catch(err => console.error("Failed to load rate limit config", err));
+}
+
+function saveRateLimitConfig() {
+  const pps = Number(document.getElementById("rlPps").value);
+  const win = Number(document.getElementById("rlWindow").value);
+  const msgEl = document.getElementById("rlMsg");
+
+  if (pps <= 0 || win <= 0) {
+    alert("Cả hai trường không được là 0 hoặc âm.");
+    return;
+  }
+  
+  if (pps < 100) {
+    if(!confirm("Ngưỡng thấp có thể block nhầm traffic hợp lệ (ví dụ: nhiều user dùng chung NAT). Bạn có chắc muốn tiếp tục?")) return;
+  }
+  if (pps > 100000) {
+    if(!confirm("Ngưỡng cao, XDP rate limiting sẽ ít hiệu quả hơn với DDoS đơn giản. Bạn có chắc muốn tiếp tục?")) return;
+  }
+
+  fetch(api + "/ratelimit/config", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ pps: pps, window_ms: win })
+  }).then(r => {
+    if (r.ok) {
+      msgEl.innerText = "Đã cập nhật — XDP áp dụng ngay lập tức, không cần restart";
+      msgEl.style.color = "#22c55e";
+      setTimeout(() => msgEl.innerText = "", 3000);
+    } else {
+      r.json().then(data => alert("Lỗi: " + (data.error || "Không xác định")));
+    }
+  });
+}
+
+function loadRateLimitIPs() {
+  fetch(api + "/ratelimit/ips")
+    .then(r => r.json())
+    .then(ips => {
+      const tbody = document.getElementById("rlIps");
+      const emptyMsg = document.getElementById("rlEmptyMsg");
+      tbody.innerHTML = "";
+
+      if (!ips || ips.length === 0) {
+        emptyMsg.style.display = "block";
+      } else {
+        emptyMsg.style.display = "none";
+        ips.forEach(item => {
+          const tr = document.createElement("tr");
+          const d = new Date(item.window_start);
+          tr.innerHTML = `
+            <td>${item.src_ip}</td>
+            <td>${item.total_count}</td>
+            <td>${d.toLocaleString()}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+    })
+    .catch(err => console.error("Failed to load rate limited IPs", err));
+}
+
+// Khởi chạy ban đầu
+loadRateLimitConfig();
+loadRateLimitIPs();
+
+// Tự động làm mới dữ liệu
+setInterval(loadRateLimitIPs, 5000); // Polling Auto-Blocked IPs mỗi 5 giây
+</script>
+
+</body>
+</html>
