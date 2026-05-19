@@ -129,6 +129,8 @@ func (fw *Firewall) AddRule(r Rule) error {
 		fw.mu.Unlock()
 
 		// # BƯỚC 5: Cập nhật luật cụ thể (Port/Proto/Action) xuống Kernel Hash Map
+		fmt.Printf("[DEBUG] Đang thêm luật: Subnet=%s/%d, Proto=%d, Port=%d, Action=%d, PolicyID=%d\n",
+				network.String(), r.Masklen, r.Proto, r.Port, r.Action, policyID)
 		return fw.updateRule(policyID, r)
 }
 
@@ -153,6 +155,8 @@ func (fw *Firewall) DeleteRule(r Rule) error {
 		// CẠM BẪY: Hiện tại hàm này chỉ xóa luật L4. Nếu đây là luật cuối cùng của Subnet đó,
 		// ta vẫn chưa xóa Subnet khỏi ipTrie. Trong một hệ thống thực tế, bạn cần thêm 
 		// cơ chế đếm (reference counting) để dọn dẹp ipTrie khi không còn luật nào dùng ID đó.
+		fmt.Printf("[DEBUG] Đang xóa luật: Subnet=%s/%d, Proto=%d, Port=%d, PolicyID=%d\n",
+				network.String(), r.Masklen, r.Proto, r.Port, policyID)
 		return fw.deleteRule(policyID, r)
 }
 
@@ -160,6 +164,7 @@ func (fw *Firewall) DeleteRule(r Rule) error {
  * # HÀM ListRules: Liệt kê toàn bộ luật đang chạy
  */
 func (fw *Firewall) ListRules() ([]Rule, error) {
+		fmt.Printf("[DEBUG] Đang lấy danh sách tất cả các luật (ListRules)\n")
 		var rules []Rule
 
 		// # BƯỚC 1: Duyệt qua toàn bộ Hash Map (Rule Map) trong Kernel
@@ -203,11 +208,13 @@ func (fw *Firewall) ListRules() ([]Rule, error) {
  * Tương tác với Array Map (chỉ có 1 phần tử tại index 0).
  */
 func (fw *Firewall) SetDefaultBehaviour(action uint32) error {
+		fmt.Printf("[DEBUG] Đang thiết lập Default Behaviour = %d\n", action)
 		var key uint32 = 0
 		return fw.defaultAction.Update(&key, &action, ebpf.UpdateAny)
 }
 
 func (fw *Firewall) GetDefaultBehaviour() (uint32, error) {
+		fmt.Printf("[DEBUG] Đang lấy Default Behaviour\n")
 		var key uint32 = 0
 		var val uint32
 
@@ -223,6 +230,7 @@ func (fw *Firewall) GetDefaultBehaviour() (uint32, error) {
  * Xóa bỏ toàn bộ cấu hình để đưa Firewall về trạng thái trắng.
  */
 func (fw *Firewall) Flush() error {
+		fmt.Printf("[DEBUG] Đang xóa toàn bộ cấu hình (Flush)\n")
 		// TODO: Thực hiện vòng lặp xóa tất cả các key trong ipTrie và policies.
 		// Cần cẩn thận với race-condition khi đang flush mà có gói tin đi vào.
 		return nil
@@ -233,6 +241,7 @@ func (fw *Firewall) Flush() error {
 // -----------------------------------------------------------
 
 func (fw *Firewall) ListRateLimitedIPs() ([]RateLimitEntry, error) {
+	fmt.Printf("[DEBUG] Đang quét danh sách IP bị giới hạn tốc độ (ListRateLimitedIPs)\n")
 	var threshold uint32
 	var configKey uint32 = 0
 	if err := fw.rlConfigMap.Lookup(&configKey, &threshold); err != nil || threshold == 0 {
@@ -279,6 +288,7 @@ func (fw *Firewall) ListRateLimitedIPs() ([]RateLimitEntry, error) {
 }
 
 func (fw *Firewall) SetRateLimitThreshold(pps uint32) error {
+	fmt.Printf("[DEBUG] Đang thiết lập Rate Limit Threshold = %d PPS\n", pps)
 	if pps == 0 {
 		return fmt.Errorf("ngưỡng PPS không được bằng 0")
 	}
@@ -290,6 +300,7 @@ func (fw *Firewall) SetRateLimitThreshold(pps uint32) error {
 }
 
 func (fw *Firewall) GetRateLimitThreshold() (uint32, error) {
+	fmt.Printf("[DEBUG] Đang lấy Rate Limit Threshold\n")
 	var configKey uint32 = 0
 	var threshold uint32
 	if err := fw.rlConfigMap.Lookup(&configKey, &threshold); err != nil {
@@ -302,6 +313,7 @@ func (fw *Firewall) GetRateLimitThreshold() (uint32, error) {
 }
 
 func (fw *Firewall) SetRateLimitWindow(ms uint32) error {
+	fmt.Printf("[DEBUG] Đang thiết lập Rate Limit Window = %d ms\n", ms)
 	if ms == 0 {
 		return fmt.Errorf("thời gian window không được bằng 0")
 	}
@@ -314,6 +326,7 @@ func (fw *Firewall) SetRateLimitWindow(ms uint32) error {
 }
 
 func (fw *Firewall) GetRateLimitWindow() (uint32, error) {
+	fmt.Printf("[DEBUG] Đang lấy Rate Limit Window\n")
 	var configKey uint32 = 1
 	var ns uint32
 	if err := fw.rlConfigMap.Lookup(&configKey, &ns); err != nil {
