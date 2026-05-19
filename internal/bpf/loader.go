@@ -107,12 +107,12 @@ func LoadAndAttach(ifaceName string, mode string) (*BPF, error) {
 	programId, xdpStatus, err := getXDPStatus(lnk)
 	if err!= nil {
 		// CẠM BẪY: Lỗi ở đây không có nghĩa là Firewall không chạy, chỉ là ta không lấy được metadata.
-		fmt.Println("[warning] failed to obtain XDP program metadata: %v", err)
-		log.Printf("[warning] failed to obtain XDP program metadata: %v", err)
+		fmt.Printf("[warning] failed to obtain XDP program metadata: %v\n", err)
+		log.Printf("[warning] failed to obtain XDP program metadata: %v\n", err)
 	} else {
 		// Log ra ID của chương trình giúp ta debug bằng lệnh `bpftool prog show id <ID>`
-		fmt.Printf("[success] xdp program attached: if_index: %d, if_name: %s, xdp_prog_id: %d", xdpStatus.Ifindex, iface.Name, programId)
-		log.Printf("[success] xdp program attached: if_index: %d, if_name: %s, xdp_prog_id: %d", xdpStatus.Ifindex, iface.Name, programId)
+		fmt.Printf("[success] xdp program attached: if_index: %d, if_name: %s, xdp_prog_id: %d\n", xdpStatus.Ifindex, iface.Name, programId)
+		log.Printf("[success] xdp program attached: if_index: %d, if_name: %s, xdp_prog_id: %d\n", xdpStatus.Ifindex, iface.Name, programId)
 	}
 
 	return &BPF{
