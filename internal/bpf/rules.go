@@ -206,7 +206,6 @@ func (fw *Firewall) DeleteRule(r Rule) error {
  * # HÀM ListRules: Liệt kê toàn bộ luật đang chạy
  */
 func (fw *Firewall) ListRules() ([]Rule, error) {
-		fmt.Printf("[DEBUG] Đang lấy danh sách tất cả các luật (ListRules)\n")
 		var rules []Rule
 
 		// # BƯỚC 1: Duyệt qua toàn bộ Hash Map (Rule Map) trong Kernel
@@ -264,7 +263,6 @@ func (fw *Firewall) SetDefaultBehaviour(action uint32) error {
 }
 
 func (fw *Firewall) GetDefaultBehaviour() (uint32, error) {
-		fmt.Printf("[DEBUG] Đang lấy Default Behaviour\n")
 		var key uint32 = 0
 		var val uint32
 
@@ -291,7 +289,6 @@ func (fw *Firewall) Flush() error {
 // -----------------------------------------------------------
 
 func (fw *Firewall) ListRateLimitedIPs() ([]RateLimitEntry, error) {
-	fmt.Printf("[DEBUG] Đang quét danh sách IP bị giới hạn tốc độ (ListRateLimitedIPs)\n")
 	var threshold uint32
 	var configKey uint32 = 0
 	if err := fw.rlConfigMap.Lookup(&configKey, &threshold); err != nil || threshold == 0 {
