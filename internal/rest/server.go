@@ -55,6 +55,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/default", s.handleDefault)
 	s.mux.HandleFunc("/health", s.handleHealth)
 	
+	// Auto Block API (Suricata/Iptables Threat Intel)
+	s.mux.HandleFunc("/autoblock/ips", s.handleAutoBlockedIPs)
+	
 	// Rate Limiting APIs
 	s.mux.HandleFunc("/ratelimit/ips", s.handleRateLimitIPs)
 	s.mux.HandleFunc("/ratelimit/config", s.handleRateLimitConfig)

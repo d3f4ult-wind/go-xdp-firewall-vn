@@ -46,6 +46,20 @@ struct rl_metrics {
 };
 
 /**
+ * # AUTO BLOCK MAP (Dành cho Watcher / Suricata / IPTABLES / GeoIP)
+ * Lưu trữ các dải IP (Subnet) bị chặn tự động từ hệ thống ngoài.
+ * Sử dụng LPM Trie để có thể chặn cả IP đơn lẻ (/32) và dải mạng (/24, /16).
+ * Value là timestamp (giây) để hệ thống ngoài dùng làm mốc thả IP (Auto-unban).
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct ipv4_lpm_key);
+    __type(value, __u64);
+    __uint(max_entries, 100000);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} auto_block_map SEC(".maps");
+
+/**
  * # RATE LIMIT MAP
  * LƯU Ý CHO GO-SIDE: Map này là PERCPU. Khi Go-side đọc map này,
  * nó sẽ nhận được một slice/array chứa các value của từng CPU core.
@@ -210,8 +224,20 @@ int xdp_packet_filter(struct xdp_md *ctx){
         return XDP_DROP;
     }
 
-    // # BƯỚC 3.5: Rate Limiting
     __u32 src_ip = iph->saddr;
+
+    // # BƯỚC 3.1: Kiểm tra danh sách đen tự động (Auto Block Map từ Watcher)
+    // Cấu trúc key giống hệt ipTrie: Tìm kiếm dải mạng cha bao trùm IP này
+    struct ipv4_lpm_key auto_key = {};
+    auto_key.prefixlen = 32;
+    *(__u32 *)auto_key.addr = src_ip;
+    
+    __u64 *block_ts = bpf_map_lookup_elem(&auto_block_map, &auto_key);
+    if (block_ts) {
+        return XDP_DROP;
+    }
+
+    // # BƯỚC 3.5: Rate Limiting
     __u64 now = bpf_ktime_get_ns();
     
     __u32 config_key_thresh = 0;

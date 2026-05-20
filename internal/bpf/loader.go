@@ -16,6 +16,7 @@ package bpf
 import (
 	"fmt"
 	"net"
+	"os"
 	"log"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf"
@@ -115,6 +116,17 @@ func LoadAndAttach(ifaceName string, mode string) (*BPF, error) {
 		log.Printf("[success] xdp program attached: if_index: %d, if_name: %s, xdp_prog_id: %d\n", xdpStatus.Ifindex, iface.Name, programId)
 	}
 
+	// # BƯỚC 6: Pin (Ghim) auto_block_map ra hệ thống file để Watcher có thể truy cập
+	const pinPath = "/sys/fs/bpf/xdp_auto_block"
+	_ = os.Remove(pinPath) // Xóa file cũ nếu bị kẹt từ lần chạy trước
+	if err := objs.AutoBlockMap.Pin(pinPath); err != nil {
+		log.Printf("[warning] Cannot pin auto_block_map to %s (make sure /sys/fs/bpf is mounted): %v\n", pinPath, err)
+		fmt.Printf("[warning] Cannot pin auto_block_map to %s: %v\n", pinPath, err)
+	} else {
+		log.Printf("[success] auto_block_map pinned to %s\n", pinPath)
+		fmt.Printf("[success] auto_block_map pinned to %s\n", pinPath)
+	}
+
 	return &BPF{
 		Objs: &objs,
 		Link: lnk,
@@ -133,6 +145,9 @@ func (b *BPF) Close() {
 		// Tháo chương trình khỏi card mạng
 		b.Link.Close()
 	}
+	// Dọn dẹp Pinned Map
+	_ = os.Remove("/sys/fs/bpf/xdp_auto_block")
+	
 	if b.Objs != nil {
 		// Giải phóng các Maps và Programs khỏi bộ nhớ Kernel
 		b.Objs.Close()

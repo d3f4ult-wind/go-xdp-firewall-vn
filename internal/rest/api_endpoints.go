@@ -258,6 +258,44 @@ func (s *Server) setDefault(w http.ResponseWriter, r *http.Request) {
 }
 
 // -----------------------------------
+// --- Auto Block APIs             ---
+// -----------------------------------
+
+func (s *Server) handleAutoBlockedIPs(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		ips, err := s.fw.ListAutoBlockedIPs()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ips)
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		var req struct {
+			CIDR string `json:"cidr"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		if err := s.fw.DeleteAutoBlockedIP(req.CIDR); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.WriteHeader(http.StatusMethodNotAllowed)
+}
+
+// -----------------------------------
 // --- Rate Limiting APIs          ---
 // -----------------------------------
 

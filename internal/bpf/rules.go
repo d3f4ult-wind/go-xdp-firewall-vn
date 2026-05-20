@@ -285,6 +285,98 @@ func (fw *Firewall) Flush() error {
 }
 
 // -----------------------------------------------------------
+// --- Auto Block APIs ---
+// -----------------------------------------------------------
+
+// AutoBlockEntry chứa thông tin của một IP bị block tự động
+type AutoBlockEntry struct {
+	IP        string `json:"ip"`
+	PrefixLen uint32 `json:"prefix_len"`
+	Timestamp uint64 `json:"timestamp"`
+	BannedAt  string `json:"banned_at"` // Chuỗi thời gian cho dễ đọc
+}
+
+// Struct ánh xạ với LPM Key trong XDP
+type LpmKey struct {
+	PrefixLen uint32
+	Data      [4]byte
+}
+
+// ListAutoBlockedIPs quét auto_block_map và trả về danh sách
+func (fw *Firewall) ListAutoBlockedIPs() ([]AutoBlockEntry, error) {
+	fmt.Println("--------------------------------------------------")
+	fmt.Printf("[ListAutoBlockedIPs] called\n")
+	
+	var entries []AutoBlockEntry
+	
+	// Khởi tạo Iterator để duyệt Map
+	iterator := fw.objs.AutoBlockMap.Iterate()
+	var key LpmKey
+	var value uint64
+	
+	for iterator.Next(&key, &value) {
+		ipStr := net.IP(key.Data[:]).String()
+		
+		t := time.Unix(int64(value), 0)
+		
+		entries = append(entries, AutoBlockEntry{
+			IP:        ipStr,
+			PrefixLen: key.PrefixLen,
+			Timestamp: value,
+			BannedAt:  t.Format(time.RFC3339),
+		})
+	}
+	
+	if err := iterator.Err(); err != nil {
+		fmt.Printf("[ListAutoBlockedIPs] ERROR: iterate map failed\n")
+		return nil, fmt.Errorf("lỗi khi duyệt auto_block_map: %w", err)
+	}
+	
+	fmt.Printf("[ListAutoBlockedIPs] success, found %d entries\n", len(entries))
+	fmt.Println("--------------------------------------------------")
+	return entries, nil
+}
+
+// DeleteAutoBlockedIP xóa thủ công một IP/Subnet khỏi auto_block_map
+func (fw *Firewall) DeleteAutoBlockedIP(cidr string) error {
+	fmt.Println("--------------------------------------------------")
+	fmt.Printf("[DeleteAutoBlockedIP] called for %s\n", cidr)
+
+	ipStr, maskStr, err := net.ParseCIDR(cidr)
+	var ip net.IP
+	var masklen int
+	
+	if err != nil {
+		ip = net.ParseIP(cidr)
+		if ip == nil {
+			return fmt.Errorf("CIDR khong hop le: %s", cidr)
+		}
+		masklen = 32
+	} else {
+		ip = ipStr
+		masklen, _ = maskStr.Mask.Size()
+	}
+
+	ip = ip.To4()
+	if ip == nil {
+		return fmt.Errorf("Chi ho tro IPv4")
+	}
+
+	key := LpmKey{
+		PrefixLen: uint32(masklen),
+	}
+	copy(key.Data[:], ip)
+
+	if err := fw.objs.AutoBlockMap.Delete(&key); err != nil {
+		return fmt.Errorf("loi khi xoa khoi auto_block_map: %w", err)
+	}
+
+	fmt.Printf("[DeleteAutoBlockedIP] success\n")
+	fmt.Println("--------------------------------------------------")
+	return nil
+}
+
+// -----------------------------------------------------------
 // --- Rate Limiting APIs ---
 // -----------------------------------------------------------
 

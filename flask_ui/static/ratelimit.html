@@ -77,7 +77,7 @@ th, td {
   <span id="rlMsg" style="margin-left: 10px; color: #22c55e;"></span>
 </div>
 
-<!-- IP BỊ CHẶN TỰ ĐỘNG -->
+<!-- IP BỊ CHẶN TỰ ĐỘNG (Rate Limit) -->
 <div class="panel">
   <h3>Auto-Blocked IPs <span style="font-size: 0.6em; background: #ef4444; padding: 2px 6px; border-radius: 4px;">Tự động (XDP Rate Limit)</span></h3>
   <table>
@@ -91,6 +91,24 @@ th, td {
     <tbody id="rlIps"></tbody>
   </table>
   <p id="rlEmptyMsg" style="color: #94a3b8; display: none; text-align: center; margin-top: 20px;">Không có IP nào đang bị rate-limit tự động</p>
+</div>
+
+<!-- IP BỊ CHẶN BỞI THREAT INTEL (Suricata/Iptables) -->
+<div class="panel">
+  <h3>Threat Intelligence Blocklist <span style="font-size: 0.6em; background: #8b5cf6; padding: 2px 6px; border-radius: 4px;">Suricata / Iptables / GeoIP</span></h3>
+  <p style="color: #94a3b8; font-size: 0.9em;">Những IP này được đẩy trực tiếp vào XDP Map bởi Management Daemon (Watcher). Bỏ qua HTTP API để đạt tốc độ tối đa.</p>
+  <table>
+    <thead>
+    <tr>
+      <th>Source Subnet / IP</th>
+      <th>Timestamp (Mốc bị block)</th>
+      <th>Thời điểm bị block</th>
+      <th>Hành động</th>
+    </tr>
+    </thead>
+    <tbody id="autoBlockIps"></tbody>
+  </table>
+  <p id="autoBlockEmptyMsg" style="color: #94a3b8; display: none; text-align: center; margin-top: 20px;">Không có IP nào trong danh sách đen Threat Intel</p>
 </div>
 
 <script>
@@ -170,12 +188,68 @@ function loadRateLimitIPs() {
     .catch(err => console.error("Failed to load rate limited IPs", err));
 }
 
+function loadAutoBlockedIPs() {
+  fetch(api + "/autoblock/ips")
+    .then(r => r.json())
+    .then(ips => {
+      const tbody = document.getElementById("autoBlockIps");
+      const emptyMsg = document.getElementById("autoBlockEmptyMsg");
+      tbody.innerHTML = "";
+
+      if (!ips || ips.length === 0) {
+        emptyMsg.style.display = "block";
+      } else {
+        emptyMsg.style.display = "none";
+        ips.forEach(item => {
+          const tr = document.createElement("tr");
+          
+          // Định dạng Subnet cho đẹp: nếu /32 thì hiển thị là IP lẻ
+          let displayIp = item.ip;
+          if (item.prefix_len !== 32) {
+             displayIp = item.ip + "/" + item.prefix_len;
+          }
+
+          tr.innerHTML = `
+            <td style="color: #f87171; font-weight: bold;">${displayIp}</td>
+            <td>${item.timestamp}</td>
+            <td>${item.banned_at}</td>
+            <td>
+              <button onclick="unbanThreatIntel('${item.ip}/${item.prefix_len}')" style="background: #ef4444; padding: 4px 8px; font-size: 0.85em;">🗑️ Gỡ bỏ</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+    })
+    .catch(err => console.error("Failed to load auto-blocked IPs", err));
+}
+
+function unbanThreatIntel(cidr) {
+  if (!confirm(`Bạn có chắc chắn muốn gỡ bỏ ${cidr} khỏi danh sách đen không?`)) return;
+  
+  fetch(api + "/autoblock/ips", {
+    method: "DELETE",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ cidr: cidr })
+  }).then(r => {
+    if (r.ok) {
+      loadAutoBlockedIPs();
+    } else {
+      r.json().then(data => alert("Lỗi khi gỡ bỏ: " + (data.error || "Không xác định")));
+    }
+  }).catch(err => alert("Không thể kết nối đến API"));
+}
+
 // Khởi chạy ban đầu
 loadRateLimitConfig();
 loadRateLimitIPs();
+loadAutoBlockedIPs();
 
 // Tự động làm mới dữ liệu
-setInterval(loadRateLimitIPs, 5000); // Polling Auto-Blocked IPs mỗi 5 giây
+setInterval(() => {
+  loadRateLimitIPs();
+  loadAutoBlockedIPs();
+}, 5000); // Polling mỗi 5 giây
 </script>
 
 </body>
