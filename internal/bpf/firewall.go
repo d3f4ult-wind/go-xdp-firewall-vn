@@ -70,6 +70,7 @@ type Firewall struct {
 	defaultAction *ebpf.Map
 	rateLimitMap  *ebpf.Map
 	rlConfigMap   *ebpf.Map
+	autoBlockMap  *ebpf.Map
 
 	// mu: Bảo vệ các map trong bộ nhớ đệm (User-space) khỏi lỗi concurrent map read/write
 	mu sync.RWMutex
@@ -99,13 +100,14 @@ type Firewall struct {
  * Khởi tạo đối tượng Firewall mới.
  * Yêu cầu các Map eBPF phải được nạp thành công trước đó.
  */
-func New(ipTrie, policies, defaultAction, rateLimitMap, rlConfigMap *ebpf.Map) *Firewall {
+func New(ipTrie, policies, defaultAction, rateLimitMap, rlConfigMap, autoBlockMap *ebpf.Map) *Firewall {
 	return &Firewall{
 		ipTrie:        ipTrie,
 		policies:      policies,
 		defaultAction: defaultAction,
 		rateLimitMap:  rateLimitMap,
 		rlConfigMap:   rlConfigMap,
+		autoBlockMap:  autoBlockMap,
 
 		prefixToID: make(map[string]uint32),
 		idToPrefix: make(map[uint32]xdp_packet_filterIpv4LpmKey),

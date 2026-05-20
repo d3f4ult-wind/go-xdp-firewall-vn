@@ -72,6 +72,7 @@ func main() {
 		bpfHandle.Objs.DefaultActionMap,
 		bpfHandle.Objs.RateLimitMap,
 		bpfHandle.Objs.RlConfigMap,
+		bpfHandle.Objs.AutoBlockMap,
 	)   
 
 	// Thiết lập hành động mặc định (vd: chặn hết hoặc cho qua hết).

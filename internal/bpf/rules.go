@@ -310,7 +310,7 @@ func (fw *Firewall) ListAutoBlockedIPs() ([]AutoBlockEntry, error) {
 	var entries []AutoBlockEntry
 	
 	// Khởi tạo Iterator để duyệt Map
-	iterator := fw.objs.AutoBlockMap.Iterate()
+	iterator := fw.autoBlockMap.Iterate()
 	var key LpmKey
 	var value uint64
 	
@@ -367,7 +367,7 @@ func (fw *Firewall) DeleteAutoBlockedIP(cidr string) error {
 	}
 	copy(key.Data[:], ip)
 
-	if err := fw.objs.AutoBlockMap.Delete(&key); err != nil {
+	if err := fw.autoBlockMap.Delete(&key); err != nil {
 		return fmt.Errorf("loi khi xoa khoi auto_block_map: %w", err)
 	}
 
