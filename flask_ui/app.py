@@ -155,6 +155,31 @@ def get_ratelimit_ips():
     data, status = call_firewall_api("GET", "/ratelimit/ips")
     return jsonify(data), status
 
+@app.route("/autoblock/ips", methods=["GET", "DELETE"])
+def handle_autoblock_ips():
+    """Lấy danh sách hoặc Xóa các IP bị block tự động bởi Threat Intel."""
+    if request.method == "GET":
+        data, status = call_firewall_api("GET", "/autoblock/ips")
+        return jsonify(data), status
+    
+    if request.method == "DELETE":
+        try:
+            r = requests.delete(
+                f"{FIREWALL_API}/autoblock/ips",
+                json=request.json,
+                timeout=2
+            )
+            if r.status_code == 200:
+                return jsonify({"status": "ok"}), 200
+
+            return jsonify({
+                "error": "Failed to unban IP",
+                "status_code": r.status_code,
+                "body": r.text
+            }), r.status_code
+        except requests.RequestException:
+            return jsonify({"error": "Firewall API unreachable"}), 503
+
 @app.route("/ratelimit/config", methods=["GET", "POST"])
 def ratelimit_config():
     """Lấy hoặc cập nhật cấu hình Rate Limiting."""
