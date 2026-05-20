@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"net"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cilium/ebpf"
