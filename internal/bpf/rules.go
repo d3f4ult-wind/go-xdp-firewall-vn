@@ -405,17 +405,30 @@ func (fw *Firewall) ListRateLimitedIPs() ([]RateLimitEntry, error) {
 			}
 		}
 
-		if totalCount > uint64(threshold) {
-			// Chuyển key uint32 -> string (Network byte order)
-			ipBytes := make([]byte, 4)
-			binary.LittleEndian.PutUint32(ipBytes, key)
-			ip := net.IPv4(ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3])
+		// Lấy cấu hình window để so sánh
+		var window uint32
+		var configKeyWindow uint32 = 1
+		if err := fw.rlConfigMap.Lookup(&configKeyWindow, &window); err != nil || window == 0 {
+			window = 1000 // Fallback 1000ms
+		}
 
-			entries = append(entries, RateLimitEntry{
-				SrcIP:       ip.String(),
-				TotalCount:  totalCount,
-				WindowStart: time.Unix(0, int64(windowStart)),
-			})
+		if totalCount > uint64(threshold) {
+			// KỊCH BẢN 3 CỦA USER: Nếu tấn công dừng lại, XDP không tự xóa map.
+			// Do đó ta cần kiểm tra xem thời gian từ lúc chặn đến hiện tại đã vượt qua Window chưa.
+			// Nếu đã vượt qua, nghĩa là IP này đã ĐƯỢC THẢ ngầm định, không hiển thị lên UI nữa.
+			lastUpdate := time.Unix(0, int64(windowStart))
+			if time.Since(lastUpdate).Milliseconds() <= int64(window) {
+				// Chuyển key uint32 -> string (Network byte order)
+				ipBytes := make([]byte, 4)
+				binary.LittleEndian.PutUint32(ipBytes, key)
+				ip := net.IPv4(ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3])
+
+				entries = append(entries, RateLimitEntry{
+					SrcIP:       ip.String(),
+					TotalCount:  totalCount,
+					WindowStart: lastUpdate,
+				})
+			}
 		}
 	}
 
