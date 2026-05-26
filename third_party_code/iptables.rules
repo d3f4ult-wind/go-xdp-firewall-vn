@@ -144,8 +144,11 @@ echo "[*] Tạo chain BOGON_FILTER..."
 iptables -N BOGON_FILTER 2>/dev/null || iptables -F BOGON_FILTER
 
 iptables -A BOGON_FILTER -s 0.0.0.0/8      -j DROP  # "This" network
-# Chặn 10.0.0.0/8 nhưng loại trừ dải lab (10.10.0.0/16)
-iptables -A BOGON_FILTER -s 10.0.0.0/8 ! -s "$LAB_NETWORK" -j DROP
+# Cho phép lab network đi qua trước
+iptables -A BOGON_FILTER -s "$LAB_NETWORK" -j RETURN
+
+# Drop phần còn lại của 10.0.0.0/8
+iptables -A BOGON_FILTER -s 10.0.0.0/8 -j DROP
 iptables -A BOGON_FILTER -s 169.254.0.0/16 -j DROP  # Link-local
 # ⚠️  Xem ghi chú ở trên trước khi bật rule này nếu lab dùng 172.16.x.x
 iptables -A BOGON_FILTER -s 172.16.0.0/12  -j DROP  # Private
