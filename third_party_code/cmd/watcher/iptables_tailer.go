@@ -21,11 +21,12 @@ type IptablesTailer struct {
 // Mặc định Iptables thường ghi log ra /var/log/syslog (Ubuntu/Debian) hoặc /var/log/messages (CentOS).
 // CHÚ Ý: Nếu hệ thống của bạn cấu hình Iptables ghi log ra file khác (vd: /var/log/kern.log), 
 // hãy sửa đường dẫn này trong file main.go khi khởi tạo NewIptablesTailer.
-func NewIptablesTailer(path string, bpfManager *BPFManager) *IptablesTailer {
+func NewIptablesTailer(path string, bpfManager *BPFManager, geoHeuristic *GeoHeuristic) *IptablesTailer {
 	return &IptablesTailer{
-		filePath:   path,
-		bpfManager: bpfManager,
-		srcIpRegex: regexp.MustCompile(`SRC=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`),
+		filePath:     path,
+		bpfManager:   bpfManager,
+		geoHeuristic: geoHeuristic,
+		srcIpRegex:   regexp.MustCompile(`SRC=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)`),
 	}
 }
 
@@ -77,6 +78,11 @@ func (t *IptablesTailer) processLine(line string) {
 			err := t.bpfManager.BlockIP(srcIP)
 			if err != nil {
 				fmt.Printf("[Iptables] Loi khi block IP: %v\n", err)
+			}
+
+			// Báo cáo IP xấu cho Heuristic Engine để đếm theo quốc gia
+			if t.geoHeuristic != nil {
+				t.geoHeuristic.ReportBadIP(srcIP)
 			}
 		}
 	}

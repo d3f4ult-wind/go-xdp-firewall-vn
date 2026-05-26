@@ -11,14 +11,16 @@ import (
 )
 
 type SuricataTailer struct {
-	filePath   string
-	bpfManager *BPFManager
+	filePath     string
+	bpfManager   *BPFManager
+	geoHeuristic *GeoHeuristic
 }
 
-func NewSuricataTailer(path string, bpfManager *BPFManager) *SuricataTailer {
+func NewSuricataTailer(path string, bpfManager *BPFManager, geoHeuristic *GeoHeuristic) *SuricataTailer {
 	return &SuricataTailer{
-		filePath:   path,
-		bpfManager: bpfManager,
+		filePath:     path,
+		bpfManager:   bpfManager,
+		geoHeuristic: geoHeuristic,
 	}
 }
 
@@ -81,6 +83,11 @@ func (t *SuricataTailer) processLine(line string) {
 		err := t.bpfManager.BlockIP(eve.SrcIP)
 		if err != nil {
 			fmt.Printf("[Suricata] Loi khi block IP: %v\n", err)
+		}
+
+		// Báo cáo IP xấu cho Heuristic Engine để đếm theo quốc gia
+		if t.geoHeuristic != nil {
+			t.geoHeuristic.ReportBadIP(eve.SrcIP)
 		}
 	}
 }

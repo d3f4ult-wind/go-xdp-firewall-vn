@@ -22,11 +22,6 @@ func main() {
 	unbanService := NewUnbanService(bpfManager, 15*60) // 15 phút
 	go unbanService.Start()
 
-	// 3. Khởi chạy tiến trình đọc log Suricata
-	// Chú ý: Đường dẫn file eve.json tùy thuộc vào cấu hình hệ thống của bạn
-	suricataTailer := NewSuricataTailer("/var/log/suricata/eve.json", bpfManager)
-	go suricataTailer.Start()
-
 	// 4. Khởi chạy bộ theo dõi GeoIP
 	geoMonitor := NewGeoIPMonitor(
 		bpfManager, 
@@ -35,10 +30,19 @@ func main() {
 	)
 	go geoMonitor.Start()
 
+	// Khởi tạo Heuristic Engine phân tích IP (Dynamic Geo-Blocking)
+	geoHeuristic := NewGeoHeuristic("../../GeoLite2-Country.mmdb", geoMonitor)
+	defer geoHeuristic.Close()
+
+	// 3. Khởi chạy tiến trình đọc log Suricata
+	// Chú ý: Đường dẫn file eve.json tùy thuộc vào cấu hình hệ thống của bạn
+	suricataTailer := NewSuricataTailer("/var/log/suricata/eve.json", bpfManager, geoHeuristic)
+	go suricataTailer.Start()
+
 	// 5. Khởi chạy tiến trình đọc log Iptables
 	// NẾU HỆ THỐNG CỦA BẠN GHI LOG IPTABLES RA FILE KHÁC (vd: /var/log/kern.log hoặc /var/log/messages)
 	// Hãy thay đổi chuỗi "/var/log/syslog" ở dưới đây thành đường dẫn tương ứng!
-	iptablesTailer := NewIptablesTailer("/var/log/syslog", bpfManager)
+	iptablesTailer := NewIptablesTailer("/var/log/syslog", bpfManager, geoHeuristic)
 	go iptablesTailer.Start()
 
 	// Giữ cho chương trình chạy cho đến khi nhận được tín hiệu dừng (Ctrl+C)
