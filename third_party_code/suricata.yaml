@@ -1,0 +1,68 @@
+%YAML 1.1
+---
+# Suricata config for lab
+
+vars:
+  address-groups:
+    HOME_NET: "[10.10.1.0/24, 10.10.2.0/24]"
+    EXTERNAL_NET: "!$HOME_NET"
+  port-groups:
+    HTTP_PORTS: "80"
+
+default-log-dir: /var/log/suricata/
+
+# Output: chỉ EVE JSON — đây là output duy nhất watcher.py cần đọc.
+# Tắt fast.log, stats.log để giảm I/O ảnh hưởng benchmark.
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      # Chỉ log alert — không log http, dns, flow... để file gọn
+      types:
+        - alert:
+            payload: no
+            metadata: yes
+
+# Chỉ load rule file của dự án, không load emerging threats hay rule mặc định
+# (các rule đó có thể gây false positive và tăng CPU không cần thiết)
+default-rule-path: /etc/suricata/rules
+rule-files:
+#  - slowloris.rules
+  - suricata.rules
+# Cấu hình capture: lắng nghe enp0s8 — mặt nhìn về Attacker VM
+# Suricata dùng af-packet (Linux native, hiệu năng tốt hơn pcap)
+af-packet:
+  - interface: enp0s8
+    # threads: auto — để Suricata tự chọn số thread phù hợp với CPU
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+
+# Tắt engine thống kê để giảm CPU overhead trong khi benchmark
+stats:
+  enabled: no
+
+# Threading tối giản
+threading:
+  set-cpu-affinity: no
+
+# App layer protocols — chỉ enable HTTP
+app-layer:
+  protocols:
+    http:
+      enabled: yes
+    tls:
+      enabled: no
+    dns:
+      enabled: no
+    smtp:
+      enabled: no
+    ssh:
+      enabled: no
+    ftp:
+      enabled: no
+    dnp3:
+      enabled: no
+    modbus:
+      enabled: no

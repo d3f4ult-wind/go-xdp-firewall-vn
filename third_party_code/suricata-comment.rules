@@ -9,6 +9,7 @@
 # Lưu ý comment: File này CHỈ dùng để đọc/tham khảo.
 #                Khi nạp vào Suricata phải dùng file _no_comments.rules
 #                vì Suricata không chấp nhận comment trong rule file.
+# Chỉnh sửa rules 2,5,6,16
 # ============================================================
 
 
@@ -153,30 +154,6 @@ alert http any any -> $HOME_NET [80,443] (msg:"CACHE BUSTING Known cache-bypass 
 # cache busting khi tool dùng query string tên tùy ý.
 # FIX v2: Thêm http.uri; trước content:"?" để gắn đúng buffer URI.
 alert http any any -> $HOME_NET [80,443] (msg:"CACHE BUSTING High volume GET with query strings"; flow:established,to_server; http.method; content:"GET"; http.uri; content:"?"; threshold: type threshold, track by_src, count 100, seconds 10; sid:9005003; rev:2; classtype:attempted-dos; metadata:affected_product CDN_Cache, attack_target Cache_Layer;)
-
-
-# ============================================================
-# DNS QUERY FLOOD
-# Cơ chế: Gửi lượng lớn DNS lookup — thường dùng subdomain
-# ngẫu nhiên để bypass DNS cache, buộc recursive resolution.
-# Yêu cầu: $DNS_SERVERS phải được định nghĩa trong suricata.yaml
-#           dưới vars: > address-groups: > DNS_SERVERS: "x.x.x.x"
-# ============================================================
-
-# Rule 20: Volume DNS query cao từ một IP — 100 query/10s là rất bất thường.
-# Server/resolver thực sự hiếm khi phát sinh hơn 20-30 query/10s.
-alert udp any any -> $DNS_SERVERS 53 (msg:"DNS FLOOD High volume DNS queries from single source"; threshold: type threshold, track by_src, count 100, seconds 10; sid:9006001; rev:2; classtype:attempted-dos; metadata:affected_product DNS_Server, attack_target DNS;)
-
-# Rule 21: DNS query tới port 53 TCP (zone transfer style) với volume cao.
-# DNS qua TCP thường dùng cho zone transfer — volume cao là đáng ngờ.
-alert tcp any any -> $DNS_SERVERS 53 (msg:"DNS FLOOD High volume TCP DNS queries"; flags:S; threshold: type threshold, track by_src, count 30, seconds 10; sid:9006002; rev:2; classtype:attempted-dos; metadata:affected_product DNS_Server, attack_target DNS_TCP;)
-
-# Rule 22: DNS ANY query — loại query trả về tất cả record, response rất lớn.
-# Thường bị lạm dụng cho DNS amplification attack.
-# FIX v2: Bỏ offset:28/depth:2 vì Suricata match trên DNS application layer payload
-#         (bắt đầu từ byte 0), không phải raw packet. Offset 28 cũ sẽ miss hoàn toàn.
-#         Dùng "|00 FF 00 01|" để match QTYPE=ANY + QCLASS=IN chính xác hơn.
-alert udp any any -> $DNS_SERVERS 53 (msg:"DNS FLOOD ANY query type - possible amplification attempt"; content:"|00 FF 00 01|"; threshold: type threshold, track by_src, count 10, seconds 5; sid:9006003; rev:2; classtype:attempted-dos; metadata:affected_product DNS_Server, attack_target DNS_Amplification;)
 
 # ============================================================
 # END OF RULES

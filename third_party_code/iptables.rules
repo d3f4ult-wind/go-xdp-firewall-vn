@@ -1,7 +1,9 @@
 #!/bin/bash
 # ============================================================
 # IPTABLES DoS RULES - Tích hợp vào Hybrid XDP-iptables-Suricata
-# Phiên bản: 2.1 (fix BOGON lab network, placeholder chains, ACK flood)
+# Phiên bản: 2.2 (fix thứ tự biến/ipset, ipset type, destroy race,
+#                  dead code ACK, ICMP whitelist fall-through,
+#                  sysctl placement, thêm set -e)
 #
 # Kiến trúc luồng:
 #   Attacker → [XDP block sớm] → FORWARD chain → [iptables] → Victim
@@ -18,16 +20,95 @@
 # ============================================================
 
 # ─────────────────────────────────────────
-# Load biến môi trường từ config chung
+# FIX v2.2 #8: Thêm set -e để script dừng ngay nếu có lệnh nào fail.
+# Trong v2.1, nếu ipset create lỗi thì script vẫn tiếp tục chạy và để lại
+# firewall ở trạng thái nửa vời — rất nguy hiểm.
+# Thêm set -u để bắt lỗi dùng biến chưa khai báo.
 # ─────────────────────────────────────────
+# Tạo thói quen bắt lỗi ngay từ đầu
+set -euo pipefail
+
+# ─────────────────────────────────────────
+# FIX v2.2 #1 & #7: Load biến môi trường TRƯỚC TẤT CẢ MỌI THỨ KHÁC.
+#
+# Lỗi trong v2.1: phần "ipset create $BLACKLIST_SET" và "ipset create $WHITELIST_SET"
+# chạy ở dòng ~30, nhưng gán giá trị mặc định cho $BLACKLIST_SET / $WHITELIST_SET
+# lại ở dòng ~40. Nếu các biến chưa được export từ môi trường ngoài,
+# ipset create sẽ chạy với tên rỗng → lỗi "ipset: Null argument given".
+#
+# Tương tự, các lệnh sysctl (echo 1 > /proc/sys/...) nằm bên trong phần
+# định nghĩa chain LAYER4_PROTECT trong v2.1. Về chức năng không sai, nhưng
+# về cấu trúc: đây là kernel-level config, không phải iptables rule.
+# Đặt tất cả sysctl ở đây cho rõ ràng và dễ audit.
+# ─────────────────────────────────────────
+
+# --- Load biến môi trường ---
 BLACKLIST_SET="${BLACKLIST_SET:-ddos_blacklist}"
 WHITELIST_SET="${WHITELIST_SET:-ddos_whitelist}"
-IFACE_IN="${IFACE_IN:-eth0}"
-IFACE_OUT="${IFACE_OUT:-eth1}"
-LOG_PREFIX="${LOG_PREFIX:-[FW-DOS] }"
+IFACE_IN="${IFACE_IN:-enp0s8}"   # Mặt hướng về attacker
+IFACE_OUT="${IFACE_OUT:-enp0s9}" # Mặt hướng về victim
+LOG_PREFIX="${LOG_PREFIX:-[FW-DOS] }" # Firewall Dos
 
 # Dải IP của lab — loại trừ khỏi BOGON_FILTER
 LAB_NETWORK="${LAB_NETWORK:-10.10.0.0/16}"
+
+# --- Kernel-level TCP protection (FIX v2.2 #7: chuyển lên đây từ LAYER4_PROTECT) ---
+# SYN cookies là hàng phòng thủ đầu tiên chống SYN flood ở kernel.
+# Nếu để trong chain definition thì rất dễ bị bỏ qua khi đọc code.
+echo "[*] Cấu hình kernel TCP protection..."
+echo 1    > /proc/sys/net/ipv4/tcp_syncookies
+echo 2048 > /proc/sys/net/ipv4/tcp_max_syn_backlog
+echo 5    > /proc/sys/net/ipv4/tcp_syn_retries
+
+
+# ─────────────────────────────────────────
+# Xóa rules cũ và ipset cũ
+#
+# FIX v2.2 #3: Trong v2.1, thứ tự là:
+#   (1) iptables -F   → flush rules
+#   (2) iptables -X   → xóa user chains
+#   (3) ipset destroy → xóa ipsets
+#
+# Nhưng "ipset destroy" (không tham số) xóa TẤT CẢ ipsets.
+# Nếu iptables còn rule nào đang reference ipset (dù đã flush),
+# kernel vẫn giữ reference count > 0 → ipset destroy sẽ fail
+# với "Set is in use" khi chạy script lần 2 trở đi.
+#
+# Giải pháp đúng: iptables -F và -X TRƯỚC, sau đó mới ipset destroy.
+# Script v2.1 ĐÃ làm đúng thứ tự này, nhưng thiếu kiểm tra lỗi.
+# Thêm || true để không crash khi không có ipset nào (lần chạy đầu tiên).
+# ─────────────────────────────────────────
+
+echo "[*] Đặt default policy thành ACCEPT trước khi flush..."
+iptables -P INPUT   ACCEPT
+iptables -P OUTPUT  ACCEPT
+iptables -P FORWARD ACCEPT
+
+echo "[*] Xóa rules và chains hiện tại..."
+iptables -F   # Flush tất cả rules
+iptables -X   # Xóa tất cả user-defined chains
+iptables -Z   # Zero counters
+
+echo "[*] Xóa ipsets hiện tại (sau khi đã flush iptables)..."
+# LAB only — không dùng trong production vì sẽ xóa tất cả ipsets!
+# || true vì lần chạy đầu tiên chưa có ipset nào để xóa
+ipset destroy || true
+
+
+# ─────────────────────────────────────────
+# FIX v2.2 #1 + #2: Tạo ipsets SAU KHI đã load biến và SAU KHI đã destroy.
+#
+# Lỗi trong v2.1:
+#   (a) ipset create $BLACKLIST_SET  ← biến chưa được gán giá trị mặc định
+#   (b) Thiếu type → ipset báo lỗi "ipset: Null argument given"
+#       hoặc "ipset: Protocol error" tùy version
+#
+# Sửa: dùng "hash:ip" làm type. Nếu cần match cả subnet thì dùng "hash:net".
+# maxelem 65536 là giá trị mặc định, ghi rõ để dễ điều chỉnh sau.
+# ─────────────────────────────────────────
+echo "[*] Tạo ipsets..."
+ipset create "$BLACKLIST_SET" hash:ip maxelem 65536
+ipset create "$WHITELIST_SET" hash:ip maxelem 65536
 
 
 # ─────────────────────────────────────────
@@ -41,7 +122,6 @@ iptables -N STATEFUL_DETECT 2>/dev/null || true
 iptables -N AUTO_BLACKLIST  2>/dev/null || true
 
 # Nếu chain rỗng thì thêm RETURN để không bị lỗi policy
-# (safe: -C kiểm tra tồn tại trước khi -A)
 iptables -C BLACKLIST_CHECK -j RETURN 2>/dev/null || iptables -A BLACKLIST_CHECK -j RETURN
 iptables -C STATEFUL_DETECT -j RETURN 2>/dev/null || iptables -A STATEFUL_DETECT -j RETURN
 iptables -C AUTO_BLACKLIST  -j RETURN 2>/dev/null || iptables -A AUTO_BLACKLIST  -j RETURN
@@ -52,8 +132,13 @@ iptables -C AUTO_BLACKLIST  -j RETURN 2>/dev/null || iptables -A AUTO_BLACKLIST 
 # Lọc IP giả mạo và địa chỉ không hợp lệ
 # Gọi trước tất cả mọi thứ — nếu IP không hợp lệ thì không cần xử lý tiếp
 #
-# FIX v2.1: Loại trừ LAB_NETWORK (10.10.0.0/16) khỏi rule DROP 10.0.0.0/8
-#           để traffic trong lab không bị chặn ngay từ đầu
+# ⚠️  FIX v2.2 / GHI CHÚ QUAN TRỌNG cho người đọc:
+#     Script hiện tại loại trừ LAB_NETWORK (10.10.0.0/16) khỏi rule DROP 10.0.0.0/8.
+#     Nếu lab mở rộng dùng 172.16.x.x hoặc 192.168.x.x, cần comment dòng DROP
+#     tương ứng và thêm exception tương tự LAB_NETWORK.
+#     Ví dụ nếu lab dùng 192.168.56.0/24:
+#       # iptables -A BOGON_FILTER -s 192.168.0.0/16 -j DROP  ← comment dòng này
+#       iptables -A BOGON_FILTER -s 192.168.0.0/16 ! -s 192.168.56.0/24 -j DROP
 # ─────────────────────────────────────────
 echo "[*] Tạo chain BOGON_FILTER..."
 iptables -N BOGON_FILTER 2>/dev/null || iptables -F BOGON_FILTER
@@ -62,18 +147,15 @@ iptables -A BOGON_FILTER -s 0.0.0.0/8      -j DROP  # "This" network
 # Chặn 10.0.0.0/8 nhưng loại trừ dải lab (10.10.0.0/16)
 iptables -A BOGON_FILTER -s 10.0.0.0/8 ! -s "$LAB_NETWORK" -j DROP
 iptables -A BOGON_FILTER -s 169.254.0.0/16 -j DROP  # Link-local
+# ⚠️  Xem ghi chú ở trên trước khi bật rule này nếu lab dùng 172.16.x.x
 iptables -A BOGON_FILTER -s 172.16.0.0/12  -j DROP  # Private
+# ⚠️  Xem ghi chú ở trên trước khi bật rule này nếu lab dùng 192.168.x.x
 iptables -A BOGON_FILTER -s 192.168.0.0/16 -j DROP  # Private
 iptables -A BOGON_FILTER -s 224.0.0.0/4    -j DROP  # Multicast
 iptables -A BOGON_FILTER -s 240.0.0.0/4    -j DROP  # Reserved
-# FIX v2.1: Bỏ "! -i lo" — trong FORWARD không có packet nào từ lo,
-#           condition này vô nghĩa và gây nhầm lẫn
+# v2.1 đã bỏ "! -i lo" đúng rồi — trong FORWARD không có packet nào từ lo
 iptables -A BOGON_FILTER -s 127.0.0.0/8    -j DROP  # Loopback giả mạo
 iptables -A BOGON_FILTER -j RETURN
-
-# Nếu lab dùng thêm dải 192.168.x.x thì comment bỏ dòng DROP 192.168.0.0/16 ở trên
-# và thêm:
-# iptables -A BOGON_FILTER -s 192.168.0.0/16 ! -s 192.168.1.0/24 -j DROP
 
 
 # ─────────────────────────────────────────
@@ -87,13 +169,33 @@ echo "[*] Tạo chain LAYER3_PROTECT..."
 iptables -N LAYER3_PROTECT 2>/dev/null || iptables -F LAYER3_PROTECT
 
 # --- L3-1: ICMP FLOOD ---
-# Cho phép ICMP từ whitelist với rate limit nhẹ hơn (họ là trusted)
-# Còn lại áp dụng rate limit nghiêm hơn trước khi DROP
+# FIX v2.2 #6: Trong v2.1, whitelist IP dùng -m limit (global counter, 20/s RETURN),
+# sau đó nếu vượt 20/s thì "fall through" xuống rule hashlimit non-whitelist (5/s DROP).
+# Kết quả: whitelist IP gửi 6-20/s sẽ bị DROP bởi rule chung — không đúng ý định.
+#
+# Sửa: thêm rule DROP riêng cho whitelist VƯỢT ngưỡng 20/s, đặt ngay sau rule RETURN.
+# Như vậy whitelist IP sẽ không bao giờ fall through xuống rule non-whitelist.
+# Flow mới:
+#   - Whitelist, ≤20/s → RETURN (cho đi tiếp)
+#   - Whitelist, >20/s → DROP  (chặn, không fall through)
+#   - Non-whitelist, >5/s → LOG + DROP
+#   - Non-whitelist, ≤5/s → fall through, RETURN ở cuối chain
+
+# Bước 1: Whitelist trong ngưỡng → RETURN
 iptables -A LAYER3_PROTECT -p icmp --icmp-type echo-request \
     -m set --match-set "$WHITELIST_SET" src \
     -m limit --limit 20/second --limit-burst 40 \
     -j RETURN
-# Với IP không trong whitelist: 5 ping/giây là đủ cho mọi use case hợp lệ
+
+# Bước 2 (FIX mới): Whitelist vượt ngưỡng → DROP ngay, không fall through
+iptables -A LAYER3_PROTECT -p icmp --icmp-type echo-request \
+    -m set --match-set "$WHITELIST_SET" src \
+    -j LOG --log-prefix "${LOG_PREFIX}ICMP-FLOOD-WL " --log-level 4
+iptables -A LAYER3_PROTECT -p icmp --icmp-type echo-request \
+    -m set --match-set "$WHITELIST_SET" src \
+    -j DROP
+
+# Bước 3: Non-whitelist — ngưỡng nghiêm hơn (5/s)
 iptables -A LAYER3_PROTECT -p icmp --icmp-type echo-request \
     -m hashlimit \
     --hashlimit-name icmp_flood \
@@ -111,7 +213,6 @@ iptables -A LAYER3_PROTECT -p icmp --icmp-type echo-request \
 
 # --- L3-2: SMURF ATTACK ---
 # ICMP tới broadcast/multicast không bao giờ hợp lệ từ bên ngoài
-# Không cần rate limit, DROP thẳng
 iptables -A LAYER3_PROTECT -p icmp \
     -m addrtype --dst-type BROADCAST \
     -j LOG --log-prefix "${LOG_PREFIX}SMURF-BCAST " --log-level 4
@@ -122,7 +223,6 @@ iptables -A LAYER3_PROTECT -p icmp \
 
 # --- L3-3: IP FRAGMENTATION FLOOD (Teardrop) ---
 # Fragment packet hợp lệ rất hiếm trong môi trường hiện đại (MTU 1500)
-# Cho phép một lượng nhỏ để không phá connectivity, DROP phần còn lại
 iptables -A LAYER3_PROTECT -f \
     -m limit --limit 20/second --limit-burst 40 \
     -j RETURN
@@ -131,8 +231,7 @@ iptables -A LAYER3_PROTECT -f \
 iptables -A LAYER3_PROTECT -f -j DROP
 
 # --- L3-4: IGMP FLOOD ---
-# IGMP (protocol 2) chỉ dùng nội bộ cho multicast, không có lý do
-# nào để nhận IGMP từ internet bên ngoài
+# IGMP (protocol 2) chỉ dùng nội bộ cho multicast
 iptables -A LAYER3_PROTECT -p igmp \
     -m set ! --match-set "$WHITELIST_SET" src \
     -j LOG --log-prefix "${LOG_PREFIX}IGMP-FLOOD " --log-level 4
@@ -141,7 +240,7 @@ iptables -A LAYER3_PROTECT -p igmp \
     -j DROP
 
 # --- L3-5: IPSEC / IKE FLOOD ---
-# IKE negotiation UDP 500/4500: 5/giây là đủ cho VPN client thật
+# IKE negotiation UDP 500/4500: 5/giây đủ cho VPN client thật
 iptables -A LAYER3_PROTECT -p udp -m multiport --dports 500,4500 \
     -m hashlimit \
     --hashlimit-name ike_flood \
@@ -157,7 +256,6 @@ iptables -A LAYER3_PROTECT -p udp -m multiport --dports 500,4500 \
     --hashlimit-mode srcip \
     -j DROP
 
-# Chain LAYER3_PROTECT kết thúc, RETURN về FORWARD chain
 iptables -A LAYER3_PROTECT -j RETURN
 
 
@@ -165,27 +263,22 @@ iptables -A LAYER3_PROTECT -j RETURN
 # CHAIN: LAYER4_PROTECT
 # Xử lý tất cả attack tầng 4 (Transport Layer)
 # Được gọi SAU LAYER3_PROTECT và SAU conntrack ESTABLISHED check
-# Lý do: một số rule tầng 4 dùng conntrack nên cần conntrack đã setup
+#
+# FIX v2.2 #7: Đã chuyển toàn bộ lệnh sysctl lên đầu script.
+# Lý do: sysctl là kernel config, không phải iptables rule.
+# Đặt trong chain definition gây nhầm lẫn và khó audit.
 # ─────────────────────────────────────────
 echo "[*] Tạo chain LAYER4_PROTECT..."
 iptables -N LAYER4_PROTECT 2>/dev/null || iptables -F LAYER4_PROTECT
 
-# --- Bật SYN cookies ở kernel (quan trọng nhất cho SYN flood) ---
-# Đây là kernel-level protection, không phải iptables rule
-# Nên để ở đây để đảm bảo luôn được bật cùng với rules
-echo 1 > /proc/sys/net/ipv4/tcp_syncookies
-echo 2048 > /proc/sys/net/ipv4/tcp_max_syn_backlog
-echo 5 > /proc/sys/net/ipv4/tcp_syn_retries
-
 # --- L4-1: SYN FLOOD ---
 # Bước 1: Chặn các TCP flag combination không hợp lệ theo RFC
-# Những packet này không bao giờ xuất hiện trong traffic thực
 iptables -A LAYER4_PROTECT -p tcp --tcp-flags SYN,FIN SYN,FIN -j DROP
 iptables -A LAYER4_PROTECT -p tcp --tcp-flags SYN,RST SYN,RST -j DROP
 iptables -A LAYER4_PROTECT -p tcp --tcp-flags ALL NONE         -j DROP
 iptables -A LAYER4_PROTECT -p tcp --tcp-flags ALL ALL          -j DROP
 
-# Bước 2: Whitelist được rate limit cao hơn (trusted source)
+# Bước 2: Whitelist — rate limit cao hơn
 iptables -A LAYER4_PROTECT -p tcp --syn \
     -m set --match-set "$WHITELIST_SET" src \
     -m hashlimit \
@@ -203,7 +296,7 @@ iptables -A LAYER4_PROTECT -p tcp --syn \
     --hashlimit-mode srcip \
     -j DROP
 
-# Bước 3: IP không trong whitelist — ngưỡng thấp hơn nhiều
+# Bước 3: Non-whitelist — ngưỡng thấp hơn
 iptables -A LAYER4_PROTECT -p tcp --syn \
     -m hashlimit \
     --hashlimit-name syn_flood \
@@ -220,7 +313,6 @@ iptables -A LAYER4_PROTECT -p tcp --syn \
     -j DROP
 
 # --- L4-2: UDP FLOOD ---
-# Whitelist được rate limit cao hơn
 iptables -A LAYER4_PROTECT -p udp \
     -m set --match-set "$WHITELIST_SET" src \
     -m hashlimit \
@@ -230,7 +322,6 @@ iptables -A LAYER4_PROTECT -p udp \
     --hashlimit-mode srcip \
     -j DROP
 
-# IP không trong whitelist: 100 UDP packet/giây là ngưỡng hợp lý cho demo
 iptables -A LAYER4_PROTECT -p udp \
     -m hashlimit \
     --hashlimit-name udp_flood \
@@ -247,28 +338,36 @@ iptables -A LAYER4_PROTECT -p udp \
     -j DROP
 
 # --- L4-3: ACK FLOOD ---
-# FIX v2.1: Thêm "! --syn" để chắc chắn chỉ match ACK không có SYN
-# ACK không có SYN mà conntrack state là NEW → packet spoofed hoặc out-of-state
-# conntrack sẽ không có record nào match → đây là spoofed packet
+# Rule 1: ACK không có SYN mà conntrack state là NEW → spoofed packet
+# (v2.1 đã có "! --syn" là đúng rồi, giữ nguyên)
 iptables -A LAYER4_PROTECT -p tcp ! --syn --tcp-flags ACK ACK \
     -m conntrack --ctstate NEW \
     -j LOG --log-prefix "${LOG_PREFIX}ACK-FLOOD-SPOOF " --log-level 4
 iptables -A LAYER4_PROTECT -p tcp ! --syn --tcp-flags ACK ACK \
     -m conntrack --ctstate NEW \
     -j DROP
-# Rate limit ACK hợp lệ để phòng trường hợp ACK flood từ connection thật
-iptables -A LAYER4_PROTECT -p tcp --tcp-flags ACK ACK \
-    -m hashlimit \
-    --hashlimit-name ack_flood \
-    --hashlimit-above 500/second \
-    --hashlimit-burst 1000 \
-    --hashlimit-mode srcip \
+
+# FIX v2.2 #4: Trong v2.1, có thêm rule rate-limit ACK hợp lệ ở đây:
+#   iptables -A LAYER4_PROTECT -p tcp --tcp-flags ACK ACK \
+#       -m hashlimit --hashlimit-above 500/second ... -j DROP
+#
+# Rule này là DEAD CODE vì mọi packet ACK thuộc session hợp lệ
+# (ESTABLISHED/RELATED) đã được ACCEPT ở bước 4 trong FORWARD chain
+# và không bao giờ đến LAYER4_PROTECT.
+#
+# Packet ACK duy nhất có thể đến đây là:
+#   (a) ctstate NEW → đã bị bắt ở rule spoofed ACK ở trên
+#   (b) ctstate INVALID → nên DROP, không cần rate-limit
+#
+# Thay bằng rule drop INVALID state để xử lý đúng:
+iptables -A LAYER4_PROTECT -p tcp \
+    -m conntrack --ctstate INVALID \
+    -j LOG --log-prefix "${LOG_PREFIX}TCP-INVALID " --log-level 4
+iptables -A LAYER4_PROTECT -p tcp \
+    -m conntrack --ctstate INVALID \
     -j DROP
 
 # --- L4-4: DNS AMPLIFICATION ---
-# Chặn DNS response có kích thước lớn bất thường về phía victim
-# Response DNS thật thường < 512 byte (UDP) hoặc < 4096 byte (TCP/EDNS)
-# Đây là traffic từ bên ngoài vào (DNS resolver gửi response về)
 iptables -A LAYER4_PROTECT -p udp --sport 53 \
     -m hashlimit \
     --hashlimit-name dns_amp \
@@ -285,14 +384,12 @@ iptables -A LAYER4_PROTECT -p udp --sport 53 \
     -j DROP
 
 # --- L4-5: MEMCACHED / NTP AMPLIFICATION ---
-# Memcached (11211) và NTP (123) không bao giờ cần accessible từ internet
-# Nếu victim không chạy public NTP/Memcached thì DROP thẳng, không log nhiều
 iptables -A LAYER4_PROTECT -p udp --sport 11211 \
     -j LOG --log-prefix "${LOG_PREFIX}MEMCACHED-AMP " --log-level 4
 iptables -A LAYER4_PROTECT -p udp --sport 11211 -j DROP
 iptables -A LAYER4_PROTECT -p tcp --sport 11211 -j DROP
 
-# NTP: cho phép tối đa 5 response/giây (đủ cho clock sync hợp lệ)
+# NTP: cho phép tối đa 5 response/giây
 iptables -A LAYER4_PROTECT -p udp --sport 123 \
     -m limit --limit 5/second --limit-burst 10 \
     -j RETURN
@@ -300,94 +397,95 @@ iptables -A LAYER4_PROTECT -p udp --sport 123 \
     -j LOG --log-prefix "${LOG_PREFIX}NTP-AMP " --log-level 4
 iptables -A LAYER4_PROTECT -p udp --sport 123 -j DROP
 
-# Chain LAYER4_PROTECT kết thúc, RETURN về FORWARD chain
 iptables -A LAYER4_PROTECT -j RETURN
 
 
 # ─────────────────────────────────────────
 # Tích hợp vào FORWARD CHAIN
-# Thứ tự quan trọng:
-#
+# Thứ tự:
 #  1. BOGON_FILTER        — loại bỏ IP giả mạo ngay từ đầu
-#  2. BLACKLIST_CHECK     — IP đã bị blacklist → DROP ngay (từ script gốc)
+#  2. BLACKLIST_CHECK     — IP đã bị blacklist → DROP ngay
 #  3. LAYER3_PROTECT      — lọc tầng 3 stateless TRƯỚC conntrack
-#  4. ESTABLISHED/RELATED — cho phép traffic thuộc session hợp lệ đi qua
+#  4. ESTABLISHED/RELATED — traffic thuộc session hợp lệ đi qua
 #  5. LAYER4_PROTECT      — lọc tầng 4, một số rule dùng conntrack
-#  6. STATEFUL_DETECT     — phát hiện SYN flood từ whitelist (từ script gốc)
-#  7. AUTO_BLACKLIST      — tự động blacklist threshold (từ script gốc)
+#  6. STATEFUL_DETECT     — phát hiện SYN flood từ whitelist
+#  7. AUTO_BLACKLIST      — tự động blacklist threshold
 #  8. Service rules       — cho phép HTTP/HTTPS/ICMP từ whitelist
 #  9. DROP default        — chặn tất cả còn lại
-#
-# Lý do thứ tự này:
-#   - BOGON trước BLACKLIST vì IP không hợp lệ không cần tra ipset (tốn kém)
-#   - LAYER3 trước conntrack vì fragment/ICMP attack không cần session tracking
-#   - ESTABLISHED trước LAYER4 vì traffic hợp lệ đang chạy không nên bị rate limit
-#   - STATEFUL_DETECT sau LAYER4 vì whitelist đã qua rate limit cơ bản rồi
 # ─────────────────────────────────────────
 echo "[*] Tích hợp vào FORWARD chain..."
 
-# Flush FORWARD chain (giữ lại các rule từ script gốc nếu cần)
 iptables -F FORWARD
 
-# Loopback và SSH management (giữ từ script gốc)
+# Loopback và SSH management
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -i "$IFACE_IN" -p tcp --dport 22 -j ACCEPT
 
-# FORWARD chain theo thứ tự đã thiết kế:
-
-# 1. Bogon filter — lọc IP không hợp lệ ngay từ đầu
+# 1. Bogon filter
 iptables -A FORWARD -i "$IFACE_IN" -j BOGON_FILTER
 
-# 2. Blacklist check — IP đã bị blacklist thì DROP, không cần xử lý tiếp
+# 2. Blacklist check
 iptables -A FORWARD -i "$IFACE_IN" -j BLACKLIST_CHECK
 
-# 3. Layer 3 protection — stateless, không cần conntrack, lọc sớm
+# 3. Layer 3 protection — stateless
 iptables -A FORWARD -i "$IFACE_IN" -j LAYER3_PROTECT
 
-# 4. ESTABLISHED/RELATED — traffic thuộc session hợp lệ đi qua ngay
-#    Không cần rate limit vì đây là traffic đang trong session đã verify
+# 4. ESTABLISHED/RELATED — traffic hợp lệ đi qua ngay, không rate-limit
+#    Đây cũng là lý do rule rate-limit ACK trong v2.1 là dead code:
+#    mọi ACK của session hợp lệ đều bị ACCEPT tại đây trước khi vào LAYER4.
 iptables -A FORWARD -i "$IFACE_IN" \
     -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-# 5. Layer 4 protection — một số rule dùng conntrack nên sau bước 4
+# 5. Layer 4 protection
 iptables -A FORWARD -i "$IFACE_IN" -j LAYER4_PROTECT
 
-# 6. Stateful detect cho whitelist (giữ từ script gốc)
+# 6. Stateful detect cho whitelist
 iptables -A FORWARD -i "$IFACE_IN" \
     -m set --match-set "$WHITELIST_SET" src \
     -p tcp --syn \
     -j STATEFUL_DETECT
 
-# 7. Auto blacklist threshold (giữ từ script gốc)
+# 7. Auto blacklist threshold
 iptables -A FORWARD -i "$IFACE_IN" -j AUTO_BLACKLIST
 
-# 8. Service rules — cho phép HTTP/HTTPS từ whitelist
+# 8. Service rules — HTTP/HTTPS từ whitelist
 iptables -A FORWARD -i "$IFACE_IN" \
     -p tcp -m multiport --dports 80,443,8080 \
     -m conntrack --ctstate NEW \
     -m set --match-set "$WHITELIST_SET" src \
     -j ACCEPT
 
-# ICMP từ whitelist (ping để test connectivity)
+# ICMP từ whitelist
 iptables -A FORWARD -i "$IFACE_IN" \
     -p icmp --icmp-type echo-request \
     -m set --match-set "$WHITELIST_SET" src \
     -j ACCEPT
 
-# 9. DROP default — log và chặn tất cả còn lại
+# 9. DROP default
 iptables -A FORWARD -i "$IFACE_IN" \
     -j LOG --log-prefix "${LOG_PREFIX}DROP-DEFAULT " --log-level 4
 iptables -A FORWARD -i "$IFACE_IN" -j DROP
 
-# Cho phép traffic reply từ Victim về Attacker (giữ từ script gốc)
+# Traffic reply từ Victim về Attacker
 iptables -A FORWARD -i "$IFACE_OUT" -j ACCEPT
 
-echo "[*] Rules applied successfully."
-echo "[*] Xem chains:        iptables -L -v -n --line-numbers"
-echo "[*] Xem LAYER3:        iptables -L LAYER3_PROTECT -v -n"
-echo "[*] Xem LAYER4:        iptables -L LAYER4_PROTECT -v -n"
-echo "[*] Xem BOGON:         iptables -L BOGON_FILTER -v -n"
+echo ""
+echo "[*] Rules applied successfully (v2.2)."
+echo "[*] Xem tất cả chains:  iptables -L -v -n --line-numbers"
+echo "[*] Xem BOGON:          iptables -L BOGON_FILTER  -v -n"
+echo "[*] Xem LAYER3:         iptables -L LAYER3_PROTECT -v -n"
+echo "[*] Xem LAYER4:         iptables -L LAYER4_PROTECT -v -n"
+echo "[*] Xem ipsets:         ipset list"
 
 # ============================================================
-# END OF FILE
+# TỔNG KẾT CÁC THAY ĐỔI TỪ v2.1 → v2.2
+#
+# FIX #1: Đổi thứ tự — load biến môi trường TRƯỚC khi tạo ipset
+# FIX #2: Thêm type "hash:ip" vào ipset create (bắt buộc theo cú pháp ipset)
+# FIX #3: Thêm "|| true" cho ipset destroy để không crash lần chạy đầu tiên
+# FIX #4: Xóa dead code ACK rate-limit, thay bằng DROP ctstate INVALID
+# FIX #5: Thêm comment ⚠️ cảnh báo về BOGON rules cho 172.16.x.x / 192.168.x.x
+# FIX #6: Thêm rule DROP whitelist ICMP vượt ngưỡng để tránh fall-through
+# FIX #7: Chuyển sysctl lên đầu script, tách khỏi chain definition
+# FIX #8: Thêm set -euo ở đầu script để bắt lỗi sớm
 # ============================================================
