@@ -343,10 +343,11 @@ iptables -A LAYER4_PROTECT -p udp \
 # --- L4-3: ACK FLOOD ---
 # Rule 1: ACK không có SYN mà conntrack state là NEW → spoofed packet
 # (v2.1 đã có "! --syn" là đúng rồi, giữ nguyên)
-iptables -A LAYER4_PROTECT -p tcp ! --syn --tcp-flags ACK ACK \
+iptables -A LAYER4_PROTECT -p tcp --tcp-flags SYN,ACK ACK \
     -m conntrack --ctstate NEW \
     -j LOG --log-prefix "${LOG_PREFIX}ACK-FLOOD-SPOOF " --log-level 4
-iptables -A LAYER4_PROTECT -p tcp ! --syn --tcp-flags ACK ACK \
+
+iptables -A LAYER4_PROTECT -p tcp --tcp-flags SYN,ACK ACK \
     -m conntrack --ctstate NEW \
     -j DROP
 
