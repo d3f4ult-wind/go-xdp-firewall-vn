@@ -11,8 +11,9 @@ import (
 )
 
 type IptablesTailer struct {
-	filePath   string
-	bpfManager *BPFManager
+	filePath     string
+	bpfManager   *BPFManager
+	geoHeuristic *GeoHeuristic
 	// Regex để tìm kiếm chuỗi dạng "SRC=192.168.1.100" trong dòng log của iptables
 	srcIpRegex *regexp.Regexp
 }
