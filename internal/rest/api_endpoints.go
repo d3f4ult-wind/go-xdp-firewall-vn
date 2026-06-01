@@ -549,3 +549,33 @@ func (s *Server) handleTier1Geo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
+
+type GeoCountryRequest struct {
+	CountryCode string `json:"country_code"`
+}
+
+func (s *Server) handleTier1GeoCountry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req GeoCountryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	count, err := s.fw.AddGeoCountry(req.CountryCode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"count": count,
+		"message": fmt.Sprintf("Imported %d CIDRs for %s", count, req.CountryCode),
+	})
+}

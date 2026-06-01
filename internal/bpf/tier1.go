@@ -2,8 +2,11 @@ package bpf
 
 import (
 	"encoding/binary"
+	"encoding/csv"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -124,4 +127,74 @@ func (fw *Firewall) AddGeoPrefix(cidrStr string) error {
 	}
 	
 	return nil
+}
+
+// AddGeoCountry tự động nạp toàn bộ CIDR của một quốc gia từ file MaxMind CSV.
+func (fw *Firewall) AddGeoCountry(countryIso string) (int, error) {
+	countryIso = strings.ToUpper(countryIso)
+
+	locPath := "internal/geolite/GeoLite2-Country-Locations-en.csv"
+	blocksPath := "internal/geolite/GeoLite2-Country-Blocks-IPv4.csv"
+
+	// 1. Tìm geoname_id từ Locations CSV
+	locFile, err := os.Open(locPath)
+	if err != nil {
+		return 0, fmt.Errorf("không thể mở %s: %w", locPath, err)
+	}
+	defer locFile.Close()
+
+	locReader := csv.NewReader(locFile)
+	locRecords, err := locReader.ReadAll()
+	if err != nil {
+		return 0, fmt.Errorf("lỗi đọc %s: %w", locPath, err)
+	}
+
+	var targetGeoID string
+	// Header: geoname_id, locale_code, continent_code, continent_name, country_iso_code, country_name, is_in_european_union
+	for i, row := range locRecords {
+		if i == 0 {
+			continue // skip header
+		}
+		if len(row) > 4 && row[4] == countryIso {
+			targetGeoID = row[0]
+			break
+		}
+	}
+
+	if targetGeoID == "" {
+		return 0, fmt.Errorf("không tìm thấy quốc gia %s trong CSDL", countryIso)
+	}
+
+	// 2. Lấy toàn bộ mạng tương ứng từ Blocks CSV
+	blkFile, err := os.Open(blocksPath)
+	if err != nil {
+		return 0, fmt.Errorf("không thể mở %s: %w", blocksPath, err)
+	}
+	defer blkFile.Close()
+
+	blkReader := csv.NewReader(blkFile)
+	blkRecords, err := blkReader.ReadAll()
+	if err != nil {
+		return 0, fmt.Errorf("lỗi đọc %s: %w", blocksPath, err)
+	}
+
+	count := 0
+	// Header: network, geoname_id, registered_country_geoname_id, represented_country_geoname_id, is_anonymous_proxy, is_satellite_provider, is_anycast
+	for i, row := range blkRecords {
+		if i == 0 {
+			continue // skip header
+		}
+		if len(row) > 2 {
+			// Kiểm tra cột geoname_id (cột 1) hoặc registered_country_geoname_id (cột 2)
+			if row[1] == targetGeoID || row[2] == targetGeoID {
+				network := row[0]
+				// Gọi thẳng hàm thêm tiền tố mà không đếm lỗi vụn vặt (ví dụ sai định dạng 1 dòng)
+				if err := fw.AddGeoPrefix(network); err == nil {
+					count++
+				}
+			}
+		}
+	}
+
+	return count, nil
 }

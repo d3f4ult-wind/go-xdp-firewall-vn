@@ -145,10 +145,27 @@ th {
       </div>
 
       <div>
-        <h4>Thêm Geo Priority CIDR</h4>
+        <h4>Thêm Geo Priority CIDR (Thủ công)</h4>
         <input type="text" id="geoCidr" placeholder="VD: 10.10.1.0/24">
         <button onclick="addGeo()">Thêm CIDR</button>
         <span id="geoMsg" style="margin-left:10px; color:#22c55e;"></span>
+      </div>
+
+      <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #334155;">
+        <h4 style="color: #f59e0b;">Auto Import GeoIP (MaxMind CSV)</h4>
+        <p style="font-size: 0.8em; color: #94a3b8;">Hệ thống sẽ nạp tự động toàn bộ CIDR của quốc gia vào Geo Trust Map.</p>
+        <select id="geoCountry" style="width: 150px;">
+          <option value="VN">Vietnam (VN)</option>
+          <option value="US">United States (US)</option>
+          <option value="CN">China (CN)</option>
+          <option value="KR">South Korea (KR)</option>
+          <option value="JP">Japan (JP)</option>
+          <option value="SG">Singapore (SG)</option>
+          <option value="TW">Taiwan (TW)</option>
+          <option value="RU">Russia (RU)</option>
+        </select>
+        <button onclick="addGeoCountry()" style="background: #f59e0b; color: #020617; font-weight: bold;">Import Toàn Bộ</button>
+        <span id="geoCountryMsg" style="margin-left:10px; color:#22c55e;"></span>
       </div>
     </div>
   </div>
@@ -264,6 +281,29 @@ th {
       }
     } catch(e) {
       showMsg("geoMsg", "Lỗi kết nối", true);
+    }
+  }
+
+  async function addGeoCountry() {
+    const country = document.getElementById("geoCountry").value;
+    const msgEl = document.getElementById("geoCountryMsg");
+    msgEl.textContent = "Đang load CSV...";
+    msgEl.style.color = "#f59e0b";
+    
+    try {
+      const res = await fetch("/api/tier1/geo_country", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({country_code: country})
+      });
+      if(res.ok) {
+        const data = await res.json();
+        showMsg("geoCountryMsg", data.message);
+      } else {
+        showMsg("geoCountryMsg", "Lỗi!", true);
+      }
+    } catch(e) {
+      showMsg("geoCountryMsg", "Lỗi kết nối", true);
     }
   }
 

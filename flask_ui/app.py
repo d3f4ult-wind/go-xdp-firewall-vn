@@ -267,6 +267,11 @@ def tier1_geo():
     data, status = call_firewall_api("POST", "/tier1/geo", json=request.json)
     return jsonify(data), status
 
+@app.route("/api/tier1/geo_country", methods=["POST"])
+def tier1_geo_country():
+    data, status = call_firewall_api("POST", "/tier1/geo_country", json=request.json)
+    return jsonify(data), status
+
 if __name__ == "__main__":
     print("[+] Firewall UI (Flask) starting...")
     print(f"[+] Forwarding requests to: {FIREWALL_API}")
