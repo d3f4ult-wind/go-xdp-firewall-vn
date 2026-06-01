@@ -242,6 +242,31 @@ def default_action():
             "message": "Invalid response from Firewall API"
         }), 502
 
+@app.route("/tier1")
+def tier1_page():
+    """Phục vụ file HTML cấu hình Adaptive Tier 1."""
+    return send_from_directory("static", "tier1.html")
+
+@app.route("/api/tier1/mitigation", methods=["POST"])
+def tier1_mitigation():
+    data, status = call_firewall_api("POST", "/tier1/mitigation", json=request.json)
+    return jsonify(data), status
+
+@app.route("/api/tier1/stats", methods=["GET"])
+def tier1_stats():
+    data, status = call_firewall_api("GET", "/tier1/stats")
+    return jsonify(data), status
+
+@app.route("/api/tier1/trusted", methods=["POST"])
+def tier1_trusted():
+    data, status = call_firewall_api("POST", "/tier1/trusted", json=request.json)
+    return jsonify(data), status
+
+@app.route("/api/tier1/geo", methods=["POST"])
+def tier1_geo():
+    data, status = call_firewall_api("POST", "/tier1/geo", json=request.json)
+    return jsonify(data), status
+
 if __name__ == "__main__":
     print("[+] Firewall UI (Flask) starting...")
     print(f"[+] Forwarding requests to: {FIREWALL_API}")

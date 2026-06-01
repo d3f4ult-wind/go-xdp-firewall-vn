@@ -64,6 +64,12 @@ func (s *Server) routes() {
 	
 	// System Config APIs
 	s.mux.HandleFunc("/enforcement", s.handleEnforcementConfig)
+
+	// Tier 1 APIs
+	s.mux.HandleFunc("/tier1/mitigation", s.handleTier1Mitigation)
+	s.mux.HandleFunc("/tier1/stats", s.handleTier1Stats)
+	s.mux.HandleFunc("/tier1/trusted", s.handleTier1Trusted)
+	s.mux.HandleFunc("/tier1/geo", s.handleTier1Geo)
 }
 
 /**

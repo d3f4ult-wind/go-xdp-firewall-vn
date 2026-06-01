@@ -448,3 +448,104 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
 }
+
+// ------------------------
+// --- TIER 1 APIs ---
+// ------------------------
+
+type MitigationConfigRequest struct {
+	Level       uint32 `json:"level"`
+	SynDrop     uint32 `json:"syn_drop"`
+	UdpDrop     uint32 `json:"udp_drop"`
+	IcmpDrop    uint32 `json:"icmp_drop"`
+	GeoSynDrop  uint32 `json:"geo_syn_drop"`
+	GeoUdpDrop  uint32 `json:"geo_udp_drop"`
+	GeoIcmpDrop uint32 `json:"geo_icmp_drop"`
+}
+
+func (s *Server) handleTier1Mitigation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MitigationConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.fw.UpdateMitigationMap(req.Level, req.SynDrop, req.UdpDrop, req.IcmpDrop, req.GeoSynDrop, req.GeoUdpDrop, req.GeoIcmpDrop); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleTier1Stats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats, err := s.fw.ReadMitigationStats()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+type TrustedIPRequest struct {
+	IP string `json:"ip"`
+}
+
+func (s *Server) handleTier1Trusted(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req TrustedIPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.fw.AddTrustedIP(req.IP); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+type GeoPrefixRequest struct {
+	CIDR string `json:"cidr"`
+}
+
+func (s *Server) handleTier1Geo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req GeoPrefixRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.fw.AddGeoPrefix(req.CIDR); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}

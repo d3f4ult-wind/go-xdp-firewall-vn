@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>XDP Firewall - Tier 1</title>
+<style>
+body {
+  font-family: monospace;
+  background: #0f172a;
+  color: #e5e7eb;
+  margin: 20px;
+}
+h1 { color: #38bdf8; }
+.panel {
+  border: 1px solid #334155;
+  padding: 12px;
+  margin-bottom: 20px;
+  border-radius: 6px;
+  background: #1e293b;
+}
+button {
+  background: #2563eb;
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+button:hover { background: #1d4ed8; }
+input, select {
+  background: #020617;
+  color: #e5e7eb;
+  border: 1px solid #334155;
+  padding: 4px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th, td {
+  border: 1px solid #334155;
+  padding: 6px;
+  text-align: left;
+}
+th {
+  background: #0f172a;
+  color: #94a3b8;
+}
+.stat-box {
+  display: inline-block;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 10px;
+  margin-right: 10px;
+  margin-bottom: 10px;
+  min-width: 150px;
+}
+.stat-title {
+  font-size: 0.8em;
+  color: #94a3b8;
+  margin-bottom: 5px;
+}
+.stat-value {
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #38bdf8;
+}
+.row {
+  display: flex;
+  gap: 20px;
+}
+.col {
+  flex: 1;
+}
+</style>
+</head>
+<body>
+
+<h1>XDP Firewall Dashboard</h1>
+
+<div style="margin-bottom: 20px; padding: 10px; background: #1e293b; border-radius: 6px; border: 1px solid #334155;">
+  <a href="/" style="color: #94a3b8; text-decoration: none; margin-right: 15px;">📊 Bảng điều khiển (Dashboard)</a>
+  <a href="/ratelimit" style="color: #94a3b8; text-decoration: none; margin-right: 15px;">🛡️ Cấu hình Ngưỡng (Rate Limit)</a>
+  <a href="/tier1" style="color: #38bdf8; text-decoration: none; font-weight: bold;">⚡ Adaptive Mitigation (Tier 1)</a>
+</div>
+
+<div class="row">
+  <!-- CỘT TRÁI: CẤU HÌNH -->
+  <div class="col">
+    <div class="panel">
+      <h3>Adaptive Mitigation Policies</h3>
+      <p style="color:#94a3b8; font-size: 0.9em;">Thiết lập tỷ lệ đánh rớt gói tin (0-100%) dựa trên Protection Level.</p>
+      
+      <div style="margin-bottom: 10px;">
+        <label style="display:inline-block; width:150px;">Protection Level:</label>
+        <select id="level">
+          <option value="0">0 (OFF)</option>
+          <option value="1">1 (Low)</option>
+          <option value="2">2 (Medium)</option>
+          <option value="3">3 (High)</option>
+        </select>
+      </div>
+
+      <h4>Global Drop Rates (%)</h4>
+      <div style="margin-bottom: 10px;">
+        <label style="display:inline-block; width:100px;">SYN Drop:</label>
+        <input type="number" id="synDrop" value="0" min="0" max="100" style="width:60px;">
+      </div>
+      <div style="margin-bottom: 10px;">
+        <label style="display:inline-block; width:100px;">UDP Drop:</label>
+        <input type="number" id="udpDrop" value="0" min="0" max="100" style="width:60px;">
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display:inline-block; width:100px;">ICMP Drop:</label>
+        <input type="number" id="icmpDrop" value="0" min="0" max="100" style="width:60px;">
+      </div>
+
+      <h4>Geo Priority Drop Rates (%)</h4>
+      <div style="margin-bottom: 10px;">
+        <label style="display:inline-block; width:100px;">SYN Drop:</label>
+        <input type="number" id="geoSynDrop" value="0" min="0" max="100" style="width:60px;">
+      </div>
+      <div style="margin-bottom: 10px;">
+        <label style="display:inline-block; width:100px;">UDP Drop:</label>
+        <input type="number" id="geoUdpDrop" value="0" min="0" max="100" style="width:60px;">
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display:inline-block; width:100px;">ICMP Drop:</label>
+        <input type="number" id="geoIcmpDrop" value="0" min="0" max="100" style="width:60px;">
+      </div>
+
+      <button onclick="updateMitigation()">Lưu Cấu Hình</button>
+      <span id="mitiMsg" style="margin-left:10px; color:#22c55e;"></span>
+    </div>
+
+    <div class="panel">
+      <h3>Dynamic Whitelisting</h3>
+      
+      <div style="margin-bottom: 15px;">
+        <h4>Thêm Trusted IP (Bypass 100%)</h4>
+        <input type="text" id="trustedIp" placeholder="VD: 192.168.1.10">
+        <button onclick="addTrusted()">Thêm IP</button>
+        <span id="trustedMsg" style="margin-left:10px; color:#22c55e;"></span>
+      </div>
+
+      <div>
+        <h4>Thêm Geo Priority CIDR</h4>
+        <input type="text" id="geoCidr" placeholder="VD: 10.10.1.0/24">
+        <button onclick="addGeo()">Thêm CIDR</button>
+        <span id="geoMsg" style="margin-left:10px; color:#22c55e;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CỘT PHẢI: THỐNG KÊ -->
+  <div class="col">
+    <div class="panel">
+      <h3>Telemetry (Mitigation Stats) <button onclick="fetchStats()" style="float:right; font-size:0.8em; padding:4px 8px;">🔄 Refresh</button></h3>
+      
+      <div class="stat-box">
+        <div class="stat-title">Total Packets Evaluated</div>
+        <div class="stat-value" id="sTotal">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-title">Tier 2 Passed</div>
+        <div class="stat-value" id="sTier2Passed" style="color: #22c55e;">0</div>
+      </div>
+      <br>
+      <div class="stat-box">
+        <div class="stat-title">Trusted Hits</div>
+        <div class="stat-value" id="sTrusted" style="color: #f59e0b;">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-title">Geo Priority Hits</div>
+        <div class="stat-value" id="sGeo" style="color: #8b5cf6;">0</div>
+      </div>
+      <br>
+      <div class="stat-box">
+        <div class="stat-title">SYN Dropped</div>
+        <div class="stat-value" id="sSynDrop" style="color: #ef4444;">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-title">UDP Dropped</div>
+        <div class="stat-value" id="sUdpDrop" style="color: #ef4444;">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-title">ICMP Dropped</div>
+        <div class="stat-value" id="sIcmpDrop" style="color: #ef4444;">0</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function showMsg(id, msg, isError=false) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.color = isError ? "#ef4444" : "#22c55e";
+    setTimeout(() => el.textContent = "", 3000);
+  }
+
+  async function updateMitigation() {
+    const data = {
+      level: parseInt(document.getElementById("level").value) || 0,
+      syn_drop: parseInt(document.getElementById("synDrop").value) || 0,
+      udp_drop: parseInt(document.getElementById("udpDrop").value) || 0,
+      icmp_drop: parseInt(document.getElementById("icmpDrop").value) || 0,
+      geo_syn_drop: parseInt(document.getElementById("geoSynDrop").value) || 0,
+      geo_udp_drop: parseInt(document.getElementById("geoUdpDrop").value) || 0,
+      geo_icmp_drop: parseInt(document.getElementById("geoIcmpDrop").value) || 0,
+    };
+    try {
+      const res = await fetch("/api/tier1/mitigation", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(data)
+      });
+      if(res.ok) {
+        showMsg("mitiMsg", "Đã cập nhật cấu hình!");
+      } else {
+        const err = await res.json();
+        showMsg("mitiMsg", "Lỗi: " + (err.error || res.statusText), true);
+      }
+    } catch(e) {
+      showMsg("mitiMsg", "Lỗi kết nối", true);
+    }
+  }
+
+  async function addTrusted() {
+    const ip = document.getElementById("trustedIp").value.trim();
+    if(!ip) return;
+    try {
+      const res = await fetch("/api/tier1/trusted", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ip})
+      });
+      if(res.ok) {
+        showMsg("trustedMsg", "Đã thêm IP!");
+        document.getElementById("trustedIp").value = "";
+      } else {
+        showMsg("trustedMsg", "Lỗi!", true);
+      }
+    } catch(e) {
+      showMsg("trustedMsg", "Lỗi kết nối", true);
+    }
+  }
+
+  async function addGeo() {
+    const cidr = document.getElementById("geoCidr").value.trim();
+    if(!cidr) return;
+    try {
+      const res = await fetch("/api/tier1/geo", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({cidr})
+      });
+      if(res.ok) {
+        showMsg("geoMsg", "Đã thêm CIDR!");
+        document.getElementById("geoCidr").value = "";
+      } else {
+        showMsg("geoMsg", "Lỗi!", true);
+      }
+    } catch(e) {
+      showMsg("geoMsg", "Lỗi kết nối", true);
+    }
+  }
+
+  async function fetchStats() {
+    try {
+      const res = await fetch("/api/tier1/stats");
+      if(res.ok) {
+        const data = await res.json();
+        document.getElementById("sTotal").textContent = data.total_packets || 0;
+        document.getElementById("sTrusted").textContent = data.trusted_hits || 0;
+        document.getElementById("sGeo").textContent = data.geo_hits || 0;
+        document.getElementById("sSynDrop").textContent = data.syn_dropped || 0;
+        document.getElementById("sUdpDrop").textContent = data.udp_dropped || 0;
+        document.getElementById("sIcmpDrop").textContent = data.icmp_dropped || 0;
+        document.getElementById("sTier2Passed").textContent = data.tier2_passed || 0;
+      }
+    } catch(e) {
+      console.error("Lỗi khi fetch stats:", e);
+    }
+  }
+
+  // Tự động fetch stats 2 giây một lần
+  setInterval(fetchStats, 2000);
+  fetchStats();
+</script>
+</body>
+</html>
