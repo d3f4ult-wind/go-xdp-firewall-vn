@@ -251,3 +251,71 @@ func (fw *Firewall) ListGeoPrefixes() ([]map[string]interface{}, error) {
 	}
 	return result, nil
 }
+
+// RemoveTrustedIP xóa một IP khỏi trusted_map
+func (fw *Firewall) RemoveTrustedIP(ipStr string) error {
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+
+	ip := net.ParseIP(ipStr).To4()
+	if ip == nil {
+		return fmt.Errorf("invalid IP address")
+	}
+
+	key := binary.LittleEndian.Uint32(ip)
+	if err := fw.trustedMap.Delete(&key); err != nil {
+		return fmt.Errorf("failed to remove trusted IP: %w", err)
+	}
+	return nil
+}
+
+// RemoveGeoPrefix xóa một CIDR khỏi geo_trust_map
+func (fw *Firewall) RemoveGeoPrefix(cidrStr string) error {
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+
+	_, ipNet, err := net.ParseCIDR(cidrStr)
+	if err != nil {
+		return fmt.Errorf("invalid CIDR: %w", err)
+	}
+
+	ip4 := ipNet.IP.To4()
+	if ip4 == nil {
+		return fmt.Errorf("only IPv4 is supported")
+	}
+
+	maskSize, _ := ipNet.Mask.Size()
+	var key xdp_packet_filterIpv4LpmKey
+	key.Prefixlen = uint32(maskSize)
+	copy(key.Addr[:], ip4)
+
+	if err := fw.geoTrustMap.Delete(&key); err != nil {
+		return fmt.Errorf("failed to remove geo CIDR: %w", err)
+	}
+	return nil
+}
+
+// ClearGeoPrefixes xóa toàn bộ các CIDR có trong geo_trust_map
+func (fw *Firewall) ClearGeoPrefixes() error {
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+
+	var keys []xdp_packet_filterIpv4LpmKey
+	iter := fw.geoTrustMap.Iterate()
+	var key xdp_packet_filterIpv4LpmKey
+	var score uint32
+
+	for iter.Next(&key, &score) {
+		keys = append(keys, key)
+	}
+
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("failed to iterate geo map: %w", err)
+	}
+
+	for _, k := range keys {
+		_ = fw.geoTrustMap.Delete(&k)
+	}
+
+	return nil
+}

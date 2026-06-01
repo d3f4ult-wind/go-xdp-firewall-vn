@@ -257,9 +257,9 @@ def tier1_stats():
     data, status = call_firewall_api("GET", "/tier1/stats")
     return jsonify(data), status
 
-@app.route("/api/tier1/trusted", methods=["POST"])
+@app.route("/api/tier1/trusted", methods=["POST", "DELETE"])
 def tier1_trusted():
-    data, status = call_firewall_api("POST", "/tier1/trusted", json=request.json)
+    data, status = call_firewall_api(request.method, "/tier1/trusted", json=request.json)
     return jsonify(data), status
 
 @app.route("/api/tier1/trusted/list", methods=["GET"])
@@ -267,14 +267,19 @@ def tier1_trusted_list():
     data, status = call_firewall_api("GET", "/tier1/trusted/list")
     return jsonify(data), status
 
-@app.route("/api/tier1/geo", methods=["POST"])
+@app.route("/api/tier1/geo", methods=["POST", "DELETE"])
 def tier1_geo():
-    data, status = call_firewall_api("POST", "/tier1/geo", json=request.json)
+    data, status = call_firewall_api(request.method, "/tier1/geo", json=request.json)
     return jsonify(data), status
 
 @app.route("/api/tier1/geo/list", methods=["GET"])
 def tier1_geo_list():
     data, status = call_firewall_api("GET", "/tier1/geo/list")
+    return jsonify(data), status
+
+@app.route("/api/tier1/geo/clear", methods=["DELETE"])
+def tier1_geo_clear():
+    data, status = call_firewall_api("DELETE", "/tier1/geo/clear")
     return jsonify(data), status
 
 @app.route("/api/tier1/geo_country", methods=["POST"])

@@ -68,10 +68,23 @@ func (s *Server) routes() {
 	// Tier 1 APIs
 	s.mux.HandleFunc("/tier1/mitigation", s.handleTier1Mitigation)
 	s.mux.HandleFunc("/tier1/stats", s.handleTier1Stats)
-	s.mux.HandleFunc("/tier1/trusted", s.handleTier1Trusted)
+	s.mux.HandleFunc("/tier1/trusted", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			s.handleTier1TrustedDelete(w, r)
+		} else {
+			s.handleTier1Trusted(w, r)
+		}
+	})
 	s.mux.HandleFunc("/tier1/trusted/list", s.handleTier1TrustedList)
-	s.mux.HandleFunc("/tier1/geo", s.handleTier1Geo)
+	s.mux.HandleFunc("/tier1/geo", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			s.handleTier1GeoDelete(w, r)
+		} else {
+			s.handleTier1Geo(w, r)
+		}
+	})
 	s.mux.HandleFunc("/tier1/geo/list", s.handleTier1GeoList)
+	s.mux.HandleFunc("/tier1/geo/clear", s.handleTier1GeoClear)
 	s.mux.HandleFunc("/tier1/geo_country", s.handleTier1GeoCountry)
 }
 

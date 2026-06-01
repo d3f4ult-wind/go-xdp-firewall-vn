@@ -94,7 +94,7 @@ th {
       
       <div style="margin-bottom: 10px;">
         <label style="display:inline-block; width:150px;">Protection Level:</label>
-        <select id="level">
+        <select id="level" onchange="autoFillWRED()">
           <option value="0">0 (OFF)</option>
           <option value="1">1 (Low)</option>
           <option value="2">2 (Medium)</option>
@@ -145,7 +145,7 @@ th {
         
         <table style="margin-top: 10px;">
           <thead>
-            <tr><th>Trusted IP</th><th>Last Seen (TS)</th></tr>
+            <tr><th>Trusted IP</th><th>Last Seen (TS)</th><th style="width: 50px;">Hành động</th></tr>
           </thead>
           <tbody id="trustedList"></tbody>
         </table>
@@ -159,7 +159,7 @@ th {
         
         <table style="margin-top: 10px;">
           <thead>
-            <tr><th>Geo CIDR</th><th>Score</th></tr>
+            <tr><th>Geo CIDR</th><th>Score</th><th style="width: 50px;">Hành động</th></tr>
           </thead>
           <tbody id="geoList"></tbody>
         </table>
@@ -179,6 +179,7 @@ th {
           <option value="RU">Russia (RU)</option>
         </select>
         <button onclick="addGeoCountry()" style="background: #f59e0b; color: #020617; font-weight: bold;">Import Toàn Bộ</button>
+        <button onclick="clearGeoCountry()" style="background: #ef4444; color: white; font-weight: bold; margin-left: 10px;">Xóa Tất Cả</button>
         <span id="geoCountryMsg" style="margin-left:10px; color:#22c55e;"></span>
       </div>
     </div>
@@ -187,7 +188,7 @@ th {
   <!-- CỘT PHẢI: THỐNG KÊ -->
   <div class="col">
     <div class="panel">
-      <h3>Telemetry (Mitigation Stats) <button onclick="fetchStats()" style="float:right; font-size:0.8em; padding:4px 8px;">🔄 Refresh</button></h3>
+      <h3>Telemetry (Mitigation Stats) <button id="btnRefresh" onclick="manualRefresh()" style="float:right; font-size:0.8em; padding:4px 8px;">🔄 Refresh</button></h3>
       
       <div class="stat-box">
         <div class="stat-title">Total Packets Evaluated</div>
@@ -258,6 +259,39 @@ th {
     }
   }
 
+  function autoFillWRED() {
+    const lvl = parseInt(document.getElementById("level").value);
+    if (lvl === 0) {
+      document.getElementById("synDrop").value = 0;
+      document.getElementById("udpDrop").value = 0;
+      document.getElementById("icmpDrop").value = 0;
+      document.getElementById("geoSynDrop").value = 0;
+      document.getElementById("geoUdpDrop").value = 0;
+      document.getElementById("geoIcmpDrop").value = 0;
+    } else if (lvl === 1) {
+      document.getElementById("synDrop").value = 25;
+      document.getElementById("udpDrop").value = 25;
+      document.getElementById("icmpDrop").value = 25;
+      document.getElementById("geoSynDrop").value = 5;
+      document.getElementById("geoUdpDrop").value = 5;
+      document.getElementById("geoIcmpDrop").value = 5;
+    } else if (lvl === 2) {
+      document.getElementById("synDrop").value = 50;
+      document.getElementById("udpDrop").value = 50;
+      document.getElementById("icmpDrop").value = 50;
+      document.getElementById("geoSynDrop").value = 15;
+      document.getElementById("geoUdpDrop").value = 15;
+      document.getElementById("geoIcmpDrop").value = 15;
+    } else if (lvl === 3) {
+      document.getElementById("synDrop").value = 100;
+      document.getElementById("udpDrop").value = 100;
+      document.getElementById("icmpDrop").value = 100;
+      document.getElementById("geoSynDrop").value = 50;
+      document.getElementById("geoUdpDrop").value = 50;
+      document.getElementById("geoIcmpDrop").value = 50;
+    }
+  }
+
   async function addTrusted() {
     const ip = document.getElementById("trustedIp").value.trim();
     if(!ip) return;
@@ -324,6 +358,52 @@ th {
     }
   }
 
+  async function deleteTrusted(ip) {
+    if(!confirm("Xóa Trusted IP: " + ip + "?")) return;
+    try {
+      const res = await fetch("/api/tier1/trusted", {
+        method: "DELETE",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ip})
+      });
+      if(res.ok) { fetchLists(); }
+      else { alert("Lỗi khi xóa IP"); }
+    } catch(e) { alert("Lỗi kết nối"); }
+  }
+
+  async function deleteGeo(cidr) {
+    if(!confirm("Xóa Geo CIDR: " + cidr + "?")) return;
+    try {
+      const res = await fetch("/api/tier1/geo", {
+        method: "DELETE",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({cidr})
+      });
+      if(res.ok) { fetchLists(); }
+      else { alert("Lỗi khi xóa CIDR"); }
+    } catch(e) { alert("Lỗi kết nối"); }
+  }
+
+  async function clearGeoCountry() {
+    if(!confirm("BẠN CÓ CHẮC MUỐN XÓA TOÀN BỘ GEO CIDR KHÔNG? Hành động này không thể hoàn tác!")) return;
+    
+    const msgEl = document.getElementById("geoCountryMsg");
+    msgEl.textContent = "Đang xóa...";
+    msgEl.style.color = "#ef4444";
+
+    try {
+      const res = await fetch("/api/tier1/geo/clear", { method: "DELETE" });
+      if(res.ok) {
+        showMsg("geoCountryMsg", "Đã xóa toàn bộ Geo CIDR!");
+        fetchLists();
+      } else {
+        showMsg("geoCountryMsg", "Lỗi khi xóa!", true);
+      }
+    } catch(e) {
+      showMsg("geoCountryMsg", "Lỗi kết nối", true);
+    }
+  }
+
   async function fetchLists() {
     try {
       const resTrusted = await fetch("/api/tier1/trusted/list");
@@ -333,10 +413,11 @@ th {
         tbody.innerHTML = "";
         if (data && data.length > 0) {
           data.forEach(item => {
-            tbody.innerHTML += `<tr><td>${item.ip}</td><td>${item.last_seen}</td></tr>`;
+            tbody.innerHTML += `<tr><td>${item.ip}</td><td>${item.last_seen}</td>
+              <td style="text-align:center;"><button style="background:#ef4444; padding:2px 6px;" onclick="deleteTrusted('${item.ip}')">X</button></td></tr>`;
           });
         } else {
-          tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#94a3b8;">Trống</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#94a3b8;">Trống</td></tr>`;
         }
       }
 
@@ -346,15 +427,15 @@ th {
         const tbody = document.getElementById("geoList");
         tbody.innerHTML = "";
         if (data && data.length > 0) {
-          // Chỉ hiển thị tối đa 50 phần tử để tránh đơ trình duyệt nếu import hàng ngàn IP
           data.slice(0, 50).forEach(item => {
-            tbody.innerHTML += `<tr><td>${item.cidr}</td><td>${item.score}</td></tr>`;
+            tbody.innerHTML += `<tr><td>${item.cidr}</td><td>${item.score}</td>
+              <td style="text-align:center;"><button style="background:#ef4444; padding:2px 6px;" onclick="deleteGeo('${item.cidr}')">X</button></td></tr>`;
           });
           if (data.length > 50) {
-             tbody.innerHTML += `<tr><td colspan="2" style="text-align:center; color:#94a3b8;">... và ${data.length - 50} dải IP khác</td></tr>`;
+             tbody.innerHTML += `<tr><td colspan="3" style="text-align:center; color:#94a3b8;">... và ${data.length - 50} dải IP khác</td></tr>`;
           }
         } else {
-          tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#94a3b8;">Trống</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#94a3b8;">Trống</td></tr>`;
         }
       }
     } catch (e) {
@@ -378,6 +459,18 @@ th {
     } catch(e) {
       console.error("Lỗi khi fetch stats:", e);
     }
+  }
+
+  function manualRefresh() {
+    const btn = document.getElementById("btnRefresh");
+    btn.textContent = "Đang tải...";
+    btn.style.color = "#f59e0b"; // Nháy vàng
+    fetchStats().then(() => {
+      setTimeout(() => {
+        btn.textContent = "🔄 Refresh";
+        btn.style.color = "white";
+      }, 300);
+    });
   }
 
   // Tự động fetch stats 2 giây một lần
