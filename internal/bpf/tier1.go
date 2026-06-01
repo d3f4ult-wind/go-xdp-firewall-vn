@@ -114,8 +114,13 @@ func (fw *Firewall) AddGeoPrefix(cidrStr string) error {
 	maskSize, _ := ipNet.Mask.Size()
 
 	var key xdp_packet_filterIpv4LpmKey
-	key.PrefixLen = uint32(maskSize)
-	copy(key.Data[:], ip4)
+	key.Prefixlen = uint32(maskSize)
+	
+	// Convert ip4 (byte slice) to uint32 (Network Byte Order)
+	// Because eBPF expects the uint32 to be in network byte order in memory,
+	// and binary.LittleEndian.Uint32 reads it exactly as it is in memory.
+	// We just read the 4 bytes into a uint32 directly without flipping.
+	key.Addr = binary.LittleEndian.Uint32(ip4)
 
 	var score uint32 = 1 // Cờ đánh dấu 1 (có priority)
 	
