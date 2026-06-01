@@ -355,7 +355,11 @@ int xdp_packet_filter(struct xdp_md *ctx){
                 struct hdr_cursor temp_nh = nh;
                 struct tcphdr *tcph;
                 if (parse_tcphdr(&temp_nh, data_end, &tcph) != -1) {
-                    if (tcph->syn == 1 && tcph->ack == 0) {
+                    // Đọc trực tiếp byte thứ 13 để lấy TCP flags tránh lỗi bitfield của LLVM/Clang
+                    __u8 *tcp_bytes = (__u8 *)tcph;
+                    __u8 tcp_flags = tcp_bytes[13];
+                    // SYN = 0x02, ACK = 0x10
+                    if ((tcp_flags & 0x02) && !(tcp_flags & 0x10)) {
                         __u32 key_drop = geo_priority ? 4 : 1;
                         __u32 *dp = bpf_map_lookup_elem(&mitigation_map, &key_drop);
                         if (dp) drop_percent = *dp;
