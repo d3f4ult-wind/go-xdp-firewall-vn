@@ -1,0 +1,29 @@
+================================================================================
+           RUNBOOK BÁO CÁO ĐỒ ÁN - THỬ NGHIỆM CHỊU TẢI FIREWALL
+================================================================================
+
+Tài liệu này hướng dẫn chạy kịch bản tự động hóa 100% dựa trên Blueprint.
+
+THÔNG SỐ MẠNG (Hãy sửa nếu máy bạn cài đặt IP khác):
+- Firewall VM: 10.10.1.x (In), 10.10.2.x (Out)
+- Attacker VM: 10.10.1.2 (Sẽ tự tạo thêm 4 Netns: 10.10.1.10, .11, .50, .100)
+- Victim VM: 10.10.2.2
+
+CÁC BƯỚC THỰC HIỆN BÁN TỰ ĐỘNG (SEMI-AUTO):
+--------------------------------------------------------------------------------
+BƯỚC 1: KHỞI TẠO MÔI TRƯỜNG MẠNG CHO ATTACKER (Chỉ chạy 1 lần)
+Tại máy Attacker VM:
+$ cd benchmark/
+$ sudo ./prepare_env.sh
+
+BƯỚC 2: CHẠY TRÊN FIREWALL VM
+Mở terminal trên Firewall VM, bật xdp-firewall daemon (Và Suricata nếu test mode hybrid).
+Sau đó, chạy công cụ điều phối (Orchestrator):
+$ sudo ./orchestrate.sh --mode hybrid
+
+BƯỚC 3: XEM KẾT QUẢ
+Vào thư mục benchmark_results_.../ để lấy các file CSV và vẽ biểu đồ.
+Trục X: Thời gian (s).
+Trục Y: Các chỉ số (%si, PPS, v.v.).
+Tham chiếu: timeline_events.csv để vẽ đường dóng (Phase 2, Phase 3).
+================================================================================
