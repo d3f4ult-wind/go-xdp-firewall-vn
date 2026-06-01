@@ -198,3 +198,56 @@ func (fw *Firewall) AddGeoCountry(countryIso string) (int, error) {
 
 	return count, nil
 }
+
+// ListTrustedIPs liệt kê toàn bộ IP có trong trusted_map
+func (fw *Firewall) ListTrustedIPs() ([]map[string]interface{}, error) {
+	fw.mu.RLock()
+	defer fw.mu.RUnlock()
+	
+	var result []map[string]interface{}
+	iter := fw.trustedMap.Iterate()
+	var key uint32
+	var ts uint64
+
+	for iter.Next(&key, &ts) {
+		ipBytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(ipBytes, key)
+		ip := net.IP(ipBytes)
+
+		result = append(result, map[string]interface{}{
+			"ip":        ip.String(),
+			"last_seen": ts,
+		})
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ListGeoPrefixes liệt kê toàn bộ CIDR có trong geo_trust_map
+func (fw *Firewall) ListGeoPrefixes() ([]map[string]interface{}, error) {
+	fw.mu.RLock()
+	defer fw.mu.RUnlock()
+	
+	var result []map[string]interface{}
+	iter := fw.geoTrustMap.Iterate()
+	var key xdp_packet_filterIpv4LpmKey
+	var score uint32
+
+	for iter.Next(&key, &score) {
+		ip := net.IP(key.Addr[:])
+		cidr := fmt.Sprintf("%s/%d", ip.String(), key.Prefixlen)
+
+		result = append(result, map[string]interface{}{
+			"cidr":  cidr,
+			"score": score,
+		})
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}

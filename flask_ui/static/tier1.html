@@ -142,6 +142,13 @@ th {
         <input type="text" id="trustedIp" placeholder="VD: 192.168.1.10">
         <button onclick="addTrusted()">Thêm IP</button>
         <span id="trustedMsg" style="margin-left:10px; color:#22c55e;"></span>
+        
+        <table style="margin-top: 10px;">
+          <thead>
+            <tr><th>Trusted IP</th><th>Last Seen (TS)</th></tr>
+          </thead>
+          <tbody id="trustedList"></tbody>
+        </table>
       </div>
 
       <div>
@@ -149,6 +156,13 @@ th {
         <input type="text" id="geoCidr" placeholder="VD: 10.10.1.0/24">
         <button onclick="addGeo()">Thêm CIDR</button>
         <span id="geoMsg" style="margin-left:10px; color:#22c55e;"></span>
+        
+        <table style="margin-top: 10px;">
+          <thead>
+            <tr><th>Geo CIDR</th><th>Score</th></tr>
+          </thead>
+          <tbody id="geoList"></tbody>
+        </table>
       </div>
 
       <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #334155;">
@@ -256,6 +270,7 @@ th {
       if(res.ok) {
         showMsg("trustedMsg", "Đã thêm IP!");
         document.getElementById("trustedIp").value = "";
+        fetchLists();
       } else {
         showMsg("trustedMsg", "Lỗi!", true);
       }
@@ -276,6 +291,7 @@ th {
       if(res.ok) {
         showMsg("geoMsg", "Đã thêm CIDR!");
         document.getElementById("geoCidr").value = "";
+        fetchLists();
       } else {
         showMsg("geoMsg", "Lỗi!", true);
       }
@@ -299,11 +315,50 @@ th {
       if(res.ok) {
         const data = await res.json();
         showMsg("geoCountryMsg", data.message);
+        fetchLists();
       } else {
         showMsg("geoCountryMsg", "Lỗi!", true);
       }
     } catch(e) {
       showMsg("geoCountryMsg", "Lỗi kết nối", true);
+    }
+  }
+
+  async function fetchLists() {
+    try {
+      const resTrusted = await fetch("/api/tier1/trusted/list");
+      if(resTrusted.ok) {
+        const data = await resTrusted.json();
+        const tbody = document.getElementById("trustedList");
+        tbody.innerHTML = "";
+        if (data && data.length > 0) {
+          data.forEach(item => {
+            tbody.innerHTML += `<tr><td>${item.ip}</td><td>${item.last_seen}</td></tr>`;
+          });
+        } else {
+          tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#94a3b8;">Trống</td></tr>`;
+        }
+      }
+
+      const resGeo = await fetch("/api/tier1/geo/list");
+      if(resGeo.ok) {
+        const data = await resGeo.json();
+        const tbody = document.getElementById("geoList");
+        tbody.innerHTML = "";
+        if (data && data.length > 0) {
+          // Chỉ hiển thị tối đa 50 phần tử để tránh đơ trình duyệt nếu import hàng ngàn IP
+          data.slice(0, 50).forEach(item => {
+            tbody.innerHTML += `<tr><td>${item.cidr}</td><td>${item.score}</td></tr>`;
+          });
+          if (data.length > 50) {
+             tbody.innerHTML += `<tr><td colspan="2" style="text-align:center; color:#94a3b8;">... và ${data.length - 50} dải IP khác</td></tr>`;
+          }
+        } else {
+          tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#94a3b8;">Trống</td></tr>`;
+        }
+      }
+    } catch (e) {
+      console.error("Lỗi khi load danh sách:", e);
     }
   }
 
@@ -328,6 +383,7 @@ th {
   // Tự động fetch stats 2 giây một lần
   setInterval(fetchStats, 2000);
   fetchStats();
+  fetchLists();
 </script>
 </body>
 </html>

@@ -262,9 +262,19 @@ def tier1_trusted():
     data, status = call_firewall_api("POST", "/tier1/trusted", json=request.json)
     return jsonify(data), status
 
+@app.route("/api/tier1/trusted/list", methods=["GET"])
+def tier1_trusted_list():
+    data, status = call_firewall_api("GET", "/tier1/trusted/list")
+    return jsonify(data), status
+
 @app.route("/api/tier1/geo", methods=["POST"])
 def tier1_geo():
     data, status = call_firewall_api("POST", "/tier1/geo", json=request.json)
+    return jsonify(data), status
+
+@app.route("/api/tier1/geo/list", methods=["GET"])
+def tier1_geo_list():
+    data, status = call_firewall_api("GET", "/tier1/geo/list")
     return jsonify(data), status
 
 @app.route("/api/tier1/geo_country", methods=["POST"])
