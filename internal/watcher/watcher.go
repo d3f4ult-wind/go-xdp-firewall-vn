@@ -2,7 +2,6 @@ package watcher
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"log"
 	"os"
