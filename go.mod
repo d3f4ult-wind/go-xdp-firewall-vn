@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	github.com/cilium/ebpf v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
+	github.com/oschwald/geoip2-golang v1.11.0
 )
 
 require (
@@ -17,6 +18,7 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/sys v0.37.0 // indirect
+	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 )
 
 tool github.com/cilium/ebpf/cmd/bpf2go

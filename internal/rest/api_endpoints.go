@@ -480,6 +480,10 @@ func (s *Server) handleTier1Mitigation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// MANUAL OVERRIDE: Admin chỉnh tay -> Tắt Auto Mode
+	s.fw.AutoMode.Store(false)
+	s.fw.CurrentLevel.Store(req.Level)
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -667,4 +671,40 @@ func (s *Server) handleTier1GeoClear(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "Cleared all Geo IPs"})
+}
+
+// ------------------------
+// --- WATCHER APIs ---
+// ------------------------
+
+func (s *Server) handleTier1Watcher(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"auto_mode":     s.fw.AutoMode.Load(),
+			"current_level": s.fw.CurrentLevel.Load(),
+		})
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			AutoMode bool `json:"auto_mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		s.fw.AutoMode.Store(req.AutoMode)
+		
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":    "ok",
+			"auto_mode": s.fw.AutoMode.Load(),
+		})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }

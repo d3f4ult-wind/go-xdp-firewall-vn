@@ -20,10 +20,23 @@ import (
 
 // Config ánh xạ trực tiếp từ file init.yaml
 type Config struct {
-	Interface     string `yaml:"interface"`      // Card mạng mục tiêu (vd: eth0)
-	Mode          string `yaml:"mode"`           // Chế độ nạp (native/skb)
-	DefaultAction uint32 `yaml:"default_action"` // Hành động mặc định (PASS/DROP)
-	Rules         []Rule `yaml:"rules"`
+	Interface     string        `yaml:"interface"`      // Card mạng mục tiêu (vd: eth0)
+	Mode          string        `yaml:"mode"`           // Chế độ nạp (native/skb)
+	DefaultAction uint32        `yaml:"default_action"` // Hành động mặc định (PASS/DROP)
+	Watcher       WatcherConfig `yaml:"watcher"`
+	Rules         []Rule        `yaml:"rules"`
+}
+
+type WatcherConfig struct {
+	KernLogPath        string `yaml:"kern_log_path"`
+	SuricataLogPath    string `yaml:"suricata_log_path"`
+	PollIntervalMs     int    `yaml:"poll_interval_ms"`
+	SlidingWindowSize  int    `yaml:"sliding_window_size"`
+	CooldownSeconds    int    `yaml:"cooldown_seconds"`
+	PpsHighWatermark   uint64 `yaml:"pps_high_watermark"`
+	PpsLowWatermark    uint64 `yaml:"pps_low_watermark"`
+	AlertHighWatermark int    `yaml:"alert_high_watermark"`
+	AlertLowWatermark  int    `yaml:"alert_low_watermark"`
 }
 
 /**
@@ -39,10 +52,11 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Cấu trúc tạm thời để hứng dữ liệu từ YAML (vì Rules trong YAML dùng SubnetAddr chuỗi)
 	var rawCfg struct {
-		Interface     string     `yaml:"interface"`
-		Mode          string     `yaml:"mode"`
-		DefaultAction uint32     `yaml:"default_action"`
-		Rules         []YamlRule `yaml:"rules"`
+		Interface     string        `yaml:"interface"`
+		Mode          string        `yaml:"mode"`
+		DefaultAction uint32        `yaml:"default_action"`
+		Watcher       WatcherConfig `yaml:"watcher"`
+		Rules         []YamlRule    `yaml:"rules"`
 	}
 
 	// # BƯỚC 2: Giải mã YAML (Unmarshal)
@@ -54,6 +68,7 @@ func LoadConfig(path string) (*Config, error) {
 		Interface:     rawCfg.Interface,
 		Mode:          rawCfg.Mode,
 		DefaultAction: rawCfg.DefaultAction,
+		Watcher:       rawCfg.Watcher,
 		Rules:         make([]Rule, 0, len(rawCfg.Rules)),
 	}
 

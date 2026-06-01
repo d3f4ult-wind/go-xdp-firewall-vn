@@ -86,6 +86,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/tier1/geo/list", s.handleTier1GeoList)
 	s.mux.HandleFunc("/tier1/geo/clear", s.handleTier1GeoClear)
 	s.mux.HandleFunc("/tier1/geo_country", s.handleTier1GeoCountry)
+	s.mux.HandleFunc("/tier1/watcher", s.handleTier1Watcher)
 }
 
 /**

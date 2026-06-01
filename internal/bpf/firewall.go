@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/ebpf"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -100,6 +101,10 @@ type Firewall struct {
 	cpuUsagePercent float64
 	memUsageMB      uint64
 	xdpAttached bool // Cờ đánh dấu XDP đã được gắn vào interface thành công hay chưa
+
+	// ---- Watcher Daemon (Phase B) ----
+	AutoMode     atomic.Bool   // Bật/tắt tự động (Hysteresis)
+	CurrentLevel atomic.Uint32 // Trạng thái Level hiện tại (0-3)
 }
 
 /**
@@ -123,4 +128,7 @@ func New(ipTrie, policies, defaultAction, rateLimitMap, rlConfigMap, autoBlockMa
 		idToPrefix: make(map[uint32]xdp_packet_filterIpv4LpmKey),
 		nextID:     1, // Bắt đầu từ 1 vì trong một số logic Kernel, 0 thường là giá trị lỗi/mặc định.
 	}
+	fw.AutoMode.Store(false) // Mặc định là tắt
+	fw.CurrentLevel.Store(0)
+	return fw
 }

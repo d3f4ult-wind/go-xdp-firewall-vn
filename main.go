@@ -16,13 +16,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"fmt"
 	"xdpfilter/internal/bpf"
 	"xdpfilter/internal/rest"
+	"xdpfilter/internal/watcher"
 )
 
 func main() {
@@ -102,6 +103,10 @@ func main() {
 	// # BƯỚC 5: Triển khai REST API Server
 	api := rest.New(fw, bpfHandle)
 	
+	// # BƯỚC 5.1: Khởi động Watcher Daemon (Phase B)
+	watcherEngine := watcher.NewWatcherEngine(fw, cfg.Watcher)
+	watcherEngine.Start()
+
 	// TẠI SAO DÙNG GOROUTINE: api.Listen là một hàm "chặn" (blocking). 
 	// Nếu không chạy ngầm, chương trình sẽ kẹt ở đây và không thể thực hiện 
 	// logic dọn dẹp (Graceful Shutdown) ở phía dưới.

@@ -29,3 +29,15 @@ mode: auto
 # bạn sẽ bị mất kết nối tới server ngay khi firewall khởi động!
 default_action: 2
 
+# # WATCHER DAEMON (Adaptive Tier 1)
+# Các thông số cấu hình cho Threat Engine (Tự động nâng/hạ cấp độ bảo vệ Tier 1)
+watcher:
+  kern_log_path: "/var/log/kern.log"
+  suricata_log_path: "/var/log/suricata/eve.json"
+  poll_interval_ms: 1000       # Thời gian chốt sổ đếm (millisecond)
+  sliding_window_size: 5       # Số lượng giá trị giữ lại trong mảng xoay vòng (để lấy trung bình)
+  cooldown_seconds: 15         # Thời gian chờ sau khi tăng cấp mới được hạ cấp
+  pps_high_watermark: 50000    # Tín hiệu Bắt Buộc (Mandatory): PPS > mức này thì tăng level
+  pps_low_watermark: 10000     # Tín hiệu Hạ cấp: PPS < mức này thì giảm level
+  alert_high_watermark: 10     # Tín hiệu Xúc Tác (Accelerator): Số lượng alert / sliding_window
+  alert_low_watermark: 2       # Tín hiệu Xúc Tác: Số lượng alert / sliding_window

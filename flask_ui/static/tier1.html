@@ -66,6 +66,16 @@ th {
   font-weight: bold;
   color: #38bdf8;
 }
+/* Toggle Switch CSS */
+.switch { position: relative; display: inline-block; width: 40px; height: 20px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .4s; }
+.slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; }
+input:checked + .slider { background-color: #22c55e; }
+input:focus + .slider { box-shadow: 0 0 1px #22c55e; }
+input:checked + .slider:before { transform: translateX(20px); }
+.slider.round { border-radius: 20px; }
+.slider.round:before { border-radius: 50%; }
 .row {
   display: flex;
   gap: 20px;
@@ -92,14 +102,24 @@ th {
       <h3>Adaptive Mitigation Policies</h3>
       <p style="color:#94a3b8; font-size: 0.9em;">Thiết lập tỷ lệ đánh rớt gói tin (0-100%) dựa trên Protection Level.</p>
       
-      <div style="margin-bottom: 10px;">
-        <label style="display:inline-block; width:150px;">Protection Level:</label>
-        <select id="level" onchange="autoFillWRED()">
-          <option value="0">0 (OFF)</option>
-          <option value="1">1 (Low)</option>
-          <option value="2">2 (Medium)</option>
-          <option value="3">3 (High)</option>
-        </select>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div>
+          <label style="display:inline-block; width:150px;">Protection Level:</label>
+          <select id="level" onchange="autoFillWRED()">
+            <option value="0">0 (OFF)</option>
+            <option value="1">1 (Low)</option>
+            <option value="2">2 (Medium)</option>
+            <option value="3">3 (High)</option>
+          </select>
+        </div>
+        <div style="background: #1e293b; padding: 5px 10px; border-radius: 5px; border: 1px solid #334155;">
+          <span style="font-weight: bold; color: #38bdf8; margin-right: 10px;">Watcher (Phase B)</span>
+          <label class="switch" style="vertical-align: middle;">
+            <input type="checkbox" id="autoModeToggle" onchange="toggleAutoMode()">
+            <span class="slider round"></span>
+          </label>
+          <span id="autoModeBadge" style="margin-left: 10px; font-size: 0.8em; padding: 2px 5px; border-radius: 3px; background: #64748b; color: white;">MANUAL</span>
+        </div>
       </div>
 
       <h4>Global Drop Rates (%)</h4>
@@ -250,12 +270,66 @@ th {
       });
       if(res.ok) {
         showMsg("mitiMsg", "Đã cập nhật cấu hình!");
+        fetchWatcherStatus(); 
       } else {
         const err = await res.json();
         showMsg("mitiMsg", "Lỗi: " + (err.error || res.statusText), true);
       }
     } catch(e) {
       showMsg("mitiMsg", "Lỗi kết nối", true);
+    }
+  }
+
+  async function toggleAutoMode() {
+    const isAuto = document.getElementById("autoModeToggle").checked;
+    try {
+      const res = await fetch("/api/tier1/watcher", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ auto_mode: isAuto })
+      });
+      if(res.ok) {
+        fetchWatcherStatus();
+      } else {
+        document.getElementById("autoModeToggle").checked = !isAuto;
+        alert("Lỗi khi chuyển trạng thái Auto Mode");
+      }
+    } catch (e) {
+      document.getElementById("autoModeToggle").checked = !isAuto;
+      alert("Lỗi kết nối API");
+    }
+  }
+
+  async function fetchWatcherStatus() {
+    try {
+      const res = await fetch("/api/tier1/watcher");
+      if (res.ok) {
+        const data = await res.json();
+        
+        // Cập nhật công tắc
+        document.getElementById("autoModeToggle").checked = data.auto_mode;
+        
+        // Cập nhật Badge
+        const badge = document.getElementById("autoModeBadge");
+        if (data.auto_mode) {
+          badge.textContent = "AUTO";
+          badge.style.background = "#22c55e"; // Màu xanh lá
+          
+          // Cập nhật UI Protection Level khớp với backend quyết định
+          if (data.current_level !== undefined) {
+            const levelSelect = document.getElementById("level");
+            if (parseInt(levelSelect.value) !== data.current_level) {
+              levelSelect.value = data.current_level;
+              autoFillWRED();
+            }
+          }
+        } else {
+          badge.textContent = "MANUAL";
+          badge.style.background = "#64748b"; // Màu xám
+        }
+      }
+    } catch (e) {
+      console.error("Lỗi khi fetch watcher status:", e);
     }
   }
 
@@ -474,9 +548,14 @@ th {
   }
 
   // Tự động fetch stats 2 giây một lần
-  setInterval(fetchStats, 2000);
+  setInterval(() => {
+    fetchStats();
+    fetchWatcherStatus();
+  }, 2000);
+  
   fetchStats();
   fetchLists();
+  fetchWatcherStatus();
 </script>
 </body>
 </html>
