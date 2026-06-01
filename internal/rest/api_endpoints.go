@@ -364,6 +364,45 @@ func (s *Server) handleRateLimitConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// -----------------------------------
+
+type EnforcementConfigRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (s *Server) handleEnforcementConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		enabled, err := s.fw.GetEnforcementFlag()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(EnforcementConfigRequest{
+			Enabled: enabled,
+		})
+
+	case http.MethodPost:
+		var req EnforcementConfigRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", 400)
+			return
+		}
+
+		if err := s.fw.SetEnforcementFlag(req.Enabled); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 // ------------------------
 // --- Health check API ---
 // ------------------------

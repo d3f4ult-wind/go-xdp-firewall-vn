@@ -74,16 +74,84 @@ struct {
 } rate_limit_map SEC(".maps");
 
 /**
- * # RATE LIMIT CONFIG MAP
+ * # RATE LIMIT & SYSTEM CONFIG MAP
  * Index 0: PPS_THRESHOLD (mặc định: 1000)
  * Index 1: TIME_WINDOW_NS (mặc định: 1000000000 - 1s)
+ * Index 2: ENFORCEMENT_FLAG (0: Tắt Firewall (PASS hết), 1: Bật Firewall)
  */
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, __u32);
     __type(value, __u32);
-    __uint(max_entries, 2);
+	__uint(max_entries, 3);
 } rl_config_map SEC(".maps");
+
+/* ==============================================================================
+ * TIER 1 MAPS (ADAPTIVE MITIGATION)
+ * Các Map này được thiết kế riêng để chống lại Spoofed SYN Flood (rand-source).
+ * ============================================================================== */
+
+/**
+ * # GEO TRUST MAP (Tier 1)
+ * Lưu trữ danh sách CIDR (ví dụ: các IP Việt Nam) để ưu tiên giảm tỷ lệ rớt.
+ * Value: __u32 trust_score (thực tế chỉ làm cờ đánh dấu 0/1).
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __type(key, struct ipv4_lpm_key);
+    __type(value, __u32);
+    __uint(max_entries, 100000);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+} geo_trust_map SEC(".maps");
+
+/**
+ * # TRUSTED MAP (Tier 1 Dynamic Whitelist)
+ * Chỉ chứa các IP ĐƠN LẺ (/32) đã được Go Controller xác minh (ví dụ: qua TCP 3-way handshake).
+ * Value: __u64 timestamp (để Controller dọn dẹp các entry cũ).
+ * Nếu IP nằm trong này, nó sẽ Bypass toàn bộ Tier 1 Mitigation (nhưng vẫn qua Tier 2).
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __type(key, __u32); // Network byte order IPv4
+    __type(value, __u64);
+    __uint(max_entries, 65536);
+} trusted_map SEC(".maps");
+
+/**
+ * # MITIGATION MAP (Tier 1 Control)
+ * Bảng điều khiển từ Go Controller xuống XDP.
+ * Index 0: protection_level (0: Tắt Tier 1, 1-3: Các mức độ tấn công)
+ * Index 1: syn_drop_percent (0-100)
+ * Index 2: udp_drop_percent (0-100)
+ * Index 3: icmp_drop_percent (0-100)
+ * Index 4: geo_syn_drop_percent (0-100)
+ * Index 5: geo_udp_drop_percent (0-100)
+ * Index 6: geo_icmp_drop_percent (0-100)
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, __u32);
+    __uint(max_entries, 7);
+} mitigation_map SEC(".maps");
+
+/**
+ * # MITIGATION STATS (Tier 1 Telemetry)
+ * Cung cấp số liệu thời gian thực về tình trạng rớt/nhận gói tin ở Tier 1.
+ * Index 0: total_packets
+ * Index 1: trusted_hits
+ * Index 2: geo_hits
+ * Index 3: syn_dropped
+ * Index 4: udp_dropped
+ * Index 5: icmp_dropped
+ * Index 6: tier2_passed
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, __u64);
+    __uint(max_entries, 7);
+} mitigation_stats SEC(".maps");
 
 /**
  * # BẢN ĐỒ SUBNET (LPM Trie)
@@ -190,11 +258,26 @@ static __always_inline int handle_udp(struct hdr_cursor *nh, void *data_end, __u
 
 /* --- Điểm nạp chương trình chính (Entry Point) --- */
 
+static __always_inline void update_mitigation_stat(__u32 index) {
+    __u64 *val = bpf_map_lookup_elem(&mitigation_stats, &index);
+    if (val) {
+        *val += 1;
+    }
+}
+
 SEC("xdp")
 int xdp_packet_filter(struct xdp_md *ctx){
     // Trỏ tới điểm bắt đầu và kết thúc của vùng đệm gói tin
     void *data = (void *)(long)ctx->data; 
     void *data_end = (void *)(long)ctx->data_end;
+
+    // # BƯỚC 0: Kiểm tra Enforcement Flag (Công tắc Benchmark)
+    // Nếu cờ = 0, Firewall đang ở Phase 2 (Tắt phòng vệ), cho qua toàn bộ gói tin
+    __u32 config_key_enforce = 2;
+    __u32 *enforce_ptr = bpf_map_lookup_elem(&rl_config_map, &config_key_enforce);
+    if (enforce_ptr && *enforce_ptr == 0) {
+        return XDP_PASS;
+    }
 
     // # BƯỚC 1: Lấy cấu hình mặc định (Default Action)
     // Nếu map này rỗng (chưa khởi tạo từ User-space), chặn đứng để đảm bảo an toàn.
@@ -225,6 +308,87 @@ int xdp_packet_filter(struct xdp_md *ctx){
     }
 
     __u32 src_ip = iph->saddr;
+    int protocol = iph->protocol;
+
+    /* ==============================================================================
+     * TIER 1: ADAPTIVE MITIGATION (Chống Rand-Source Flood)
+     * ============================================================================== */
+    update_mitigation_stat(0); // Index 0: total_packets
+
+    bool skip_mitigation = false;
+    bool geo_priority = false;
+
+    // 1. Kiểm tra Trusted Map (Dynamic Whitelist)
+    __u64 *trusted_ts = bpf_map_lookup_elem(&trusted_map, &src_ip);
+    if (trusted_ts) {
+        __u64 now = bpf_ktime_get_ns();
+        bpf_map_update_elem(&trusted_map, &src_ip, &now, BPF_ANY); // Cập nhật last_seen
+        update_mitigation_stat(1); // Index 1: trusted_hits
+        skip_mitigation = true;
+    }
+
+    // 2. Kiểm tra Geo Trust Map
+    if (!skip_mitigation) {
+        struct ipv4_lpm_key geo_key = {};
+        geo_key.prefixlen = 32;
+        *(__u32 *)geo_key.addr = src_ip;
+        
+        __u32 *geo_score = bpf_map_lookup_elem(&geo_trust_map, &geo_key);
+        if (geo_score) {
+            update_mitigation_stat(2); // Index 2: geo_hits
+            geo_priority = true;
+        }
+    }
+
+    // 3. Probabilistic Drop (Chỉ áp dụng nếu chưa skip và Protection Level > 0)
+    if (!skip_mitigation) {
+        __u32 key_level = 0;
+        __u32 *level = bpf_map_lookup_elem(&mitigation_map, &key_level);
+        
+        if (level && *level > 0) {
+            __u32 drop_percent = 0;
+            __u32 stat_idx = 0;
+            bool should_check_drop = false;
+
+            if (protocol == IPPROTO_TCP) {
+                // Phải check SYN. Nhòm thử header TCP.
+                struct hdr_cursor temp_nh = nh;
+                struct tcphdr *tcph;
+                if (parse_tcphdr(&temp_nh, data_end, &tcph) != -1) {
+                    if (tcph->syn == 1 && tcph->ack == 0) {
+                        __u32 key_drop = geo_priority ? 4 : 1;
+                        __u32 *dp = bpf_map_lookup_elem(&mitigation_map, &key_drop);
+                        if (dp) drop_percent = *dp;
+                        stat_idx = 3; // syn_dropped
+                        should_check_drop = true;
+                    }
+                }
+            } else if (protocol == IPPROTO_UDP) {
+                __u32 key_drop = geo_priority ? 5 : 2;
+                __u32 *dp = bpf_map_lookup_elem(&mitigation_map, &key_drop);
+                if (dp) drop_percent = *dp;
+                stat_idx = 4; // udp_dropped
+                should_check_drop = true;
+            } else if (protocol == IPPROTO_ICMP) {
+                __u32 key_drop = geo_priority ? 6 : 3;
+                __u32 *dp = bpf_map_lookup_elem(&mitigation_map, &key_drop);
+                if (dp) drop_percent = *dp;
+                stat_idx = 5; // icmp_dropped
+                should_check_drop = true;
+            }
+
+            if (should_check_drop && drop_percent > 0) {
+                if ((bpf_get_prandom_u32() % 100) < drop_percent) {
+                    update_mitigation_stat(stat_idx);
+                    return XDP_DROP;
+                }
+            }
+        }
+    }
+
+    /* ==============================================================================
+     * TIER 2: PER-IP DEFENSE (Rate Limit, Auto Block, Rules)
+     * ============================================================================== */
 
     // # BƯỚC 3.1: Kiểm tra danh sách đen tự động (Auto Block Map từ Watcher)
     // Cấu trúc key giống hệt ipTrie: Tìm kiếm dải mạng cha bao trùm IP này
@@ -281,26 +445,33 @@ int xdp_packet_filter(struct xdp_md *ctx){
     __u32 *subnet_id = bpf_map_lookup_elem(&subnet_map, &subnet_key);
     
     // Nếu IP nguồn không thuộc bất kỳ dải quản lý nào -> Áp dụng Default Action
+    // Nếu IP nguồn không thuộc bất kỳ dải quản lý nào -> Áp dụng Default Action
     if(!subnet_id){
+        if (*default_rc == XDP_PASS) update_mitigation_stat(6);
         return *default_rc;
     }
 
     // # BƯỚC 5: Phân giải Layer 4 và áp dụng luật cụ thể
     __u32 sid = *subnet_id;
+    int rc = *default_rc;
     
     // Phân nhánh xử lý dựa trên protocol
     if (iph->protocol == IPPROTO_TCP){
-        return handle_tcp(&nh, data_end, sid, default_rc);
+        rc = handle_tcp(&nh, data_end, sid, default_rc);
     }
-    if (iph->protocol == IPPROTO_UDP){
-        return handle_udp(&nh, data_end, sid, default_rc);
+    else if (iph->protocol == IPPROTO_UDP){
+        rc = handle_udp(&nh, data_end, sid, default_rc);
     }
-    if (iph->protocol == IPPROTO_ICMP){
-        return handle_icmp(&nh, data_end, sid, default_rc);
+    else if (iph->protocol == IPPROTO_ICMP){
+        rc = handle_icmp(&nh, data_end, sid, default_rc);
     }
 
-    // Nếu là protocol lạ (SCTP, v.v.), dùng Default Action
-    return *default_rc;
+    // Nếu lọt qua toàn bộ firewall mà là PASS
+    if (rc == XDP_PASS) {
+        update_mitigation_stat(6); // tier2_passed
+    }
+
+    return rc;
 }
 
 // Bắt buộc phải có license để sử dụng các hàm helper của Kernel (GPL)

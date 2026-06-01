@@ -61,6 +61,9 @@ func (s *Server) routes() {
 	// Rate Limiting APIs
 	s.mux.HandleFunc("/ratelimit/ips", s.handleRateLimitIPs)
 	s.mux.HandleFunc("/ratelimit/config", s.handleRateLimitConfig)
+	
+	// System Config APIs
+	s.mux.HandleFunc("/enforcement", s.handleEnforcementConfig)
 }
 
 /**

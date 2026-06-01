@@ -489,3 +489,26 @@ func (fw *Firewall) GetRateLimitWindow() (uint32, error) {
 	}
 	return ns / 1_000_000, nil
 }
+
+func (fw *Firewall) SetEnforcementFlag(enabled bool) error {
+	var flag uint32 = 0
+	if enabled {
+		flag = 1
+	}
+	fmt.Printf("[DEBUG] Đang thiết lập Enforcement Flag = %d\n", flag)
+	var configKey uint32 = 2
+	if err := fw.rlConfigMap.Update(&configKey, &flag, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("lỗi khi cập nhật rl_config_map: %w", err)
+	}
+	return nil
+}
+
+func (fw *Firewall) GetEnforcementFlag() (bool, error) {
+	fmt.Printf("[DEBUG] Đang lấy Enforcement Flag\n")
+	var configKey uint32 = 2
+	var flag uint32
+	if err := fw.rlConfigMap.Lookup(&configKey, &flag); err != nil {
+		return false, fmt.Errorf("lỗi khi đọc rl_config_map: %w", err)
+	}
+	return flag == 1, nil
+}

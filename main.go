@@ -73,6 +73,10 @@ func main() {
 		bpfHandle.Objs.RateLimitMap,
 		bpfHandle.Objs.RlConfigMap,
 		bpfHandle.Objs.AutoBlockMap,
+		bpfHandle.Objs.GeoTrustMap,
+		bpfHandle.Objs.TrustedMap,
+		bpfHandle.Objs.MitigationMap,
+		bpfHandle.Objs.MitigationStats,
 	)   
 
 	// Thiết lập hành động mặc định (vd: chặn hết hoặc cho qua hết).
@@ -80,6 +84,12 @@ func main() {
 		log.Fatalf("failed to set default action: %v", err)
 	}
 	log.Printf("default action set to %d", cfg.DefaultAction)
+
+	// Bật XDP Enforcement Flag mặc định (Có thể tắt tạm thời trong lúc Benchmark)
+	if err := fw.SetEnforcementFlag(true); err != nil {
+		log.Fatalf("failed to set enforcement flag: %v", err)
+	}
+	log.Printf("enforcement flag set to ACTIVE")
 
 	// Nạp các luật tĩnh từ file cấu hình vào Kernel ngay khi khởi động.
 	for _, rule := range cfg.Rules {
