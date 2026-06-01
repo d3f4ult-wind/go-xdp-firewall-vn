@@ -112,7 +112,7 @@ type Firewall struct {
  * Yêu cầu các Map eBPF phải được nạp thành công trước đó.
  */
 func New(ipTrie, policies, defaultAction, rateLimitMap, rlConfigMap, autoBlockMap, geoTrustMap, trustedMap, mitigationMap, mitigationStats *ebpf.Map) *Firewall {
-	return &Firewall{
+	fw := &Firewall{
 		ipTrie:          ipTrie,
 		policies:        policies,
 		defaultAction:   defaultAction,
