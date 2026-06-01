@@ -315,8 +315,8 @@ int xdp_packet_filter(struct xdp_md *ctx){
      * ============================================================================== */
     update_mitigation_stat(0); // Index 0: total_packets
 
-    bool skip_mitigation = false;
-    bool geo_priority = false;
+    __u8 skip_mitigation = 0;
+    __u8 geo_priority = 0;
 
     // 1. Kiểm tra Trusted Map (Dynamic Whitelist)
     __u64 *trusted_ts = bpf_map_lookup_elem(&trusted_map, &src_ip);
@@ -324,7 +324,7 @@ int xdp_packet_filter(struct xdp_md *ctx){
         __u64 now = bpf_ktime_get_ns();
         bpf_map_update_elem(&trusted_map, &src_ip, &now, BPF_ANY); // Cập nhật last_seen
         update_mitigation_stat(1); // Index 1: trusted_hits
-        skip_mitigation = true;
+        skip_mitigation = 1;
     }
 
     // 2. Kiểm tra Geo Trust Map
@@ -336,7 +336,7 @@ int xdp_packet_filter(struct xdp_md *ctx){
         __u32 *geo_score = bpf_map_lookup_elem(&geo_trust_map, &geo_key);
         if (geo_score) {
             update_mitigation_stat(2); // Index 2: geo_hits
-            geo_priority = true;
+            geo_priority = 1;
         }
     }
 
@@ -348,7 +348,7 @@ int xdp_packet_filter(struct xdp_md *ctx){
         if (level && *level > 0) {
             __u32 drop_percent = 0;
             __u32 stat_idx = 0;
-            bool should_check_drop = false;
+            __u8 should_check_drop = 0;
 
             if (protocol == IPPROTO_TCP) {
                 // Phải check SYN. Nhòm thử header TCP.
@@ -360,7 +360,7 @@ int xdp_packet_filter(struct xdp_md *ctx){
                         __u32 *dp = bpf_map_lookup_elem(&mitigation_map, &key_drop);
                         if (dp) drop_percent = *dp;
                         stat_idx = 3; // syn_dropped
-                        should_check_drop = true;
+                        should_check_drop = 1;
                     }
                 }
             } else if (protocol == IPPROTO_UDP) {
@@ -368,13 +368,13 @@ int xdp_packet_filter(struct xdp_md *ctx){
                 __u32 *dp = bpf_map_lookup_elem(&mitigation_map, &key_drop);
                 if (dp) drop_percent = *dp;
                 stat_idx = 4; // udp_dropped
-                should_check_drop = true;
+                should_check_drop = 1;
             } else if (protocol == IPPROTO_ICMP) {
                 __u32 key_drop = geo_priority ? 6 : 3;
                 __u32 *dp = bpf_map_lookup_elem(&mitigation_map, &key_drop);
                 if (dp) drop_percent = *dp;
                 stat_idx = 5; // icmp_dropped
-                should_check_drop = true;
+                should_check_drop = 1;
             }
 
             if (should_check_drop && drop_percent > 0) {
