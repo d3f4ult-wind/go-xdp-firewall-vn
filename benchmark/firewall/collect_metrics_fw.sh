@@ -71,7 +71,7 @@ while true; do
     
     # 3. Interrupts & SoftIRQs
     # Tên driver virtio hoặc enp0s8, nếu không tìm thấy, fallback sang /sys rx_packets
-    cur_irq=$(grep -iE "${EXT_IFACE}|virtio" /proc/interrupts | awk '{sum=0; for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) sum+=$i; print sum}' || true)
+    cur_irq=$(grep -iE "${EXT_IFACE}|virtio" /proc/interrupts | awk '{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) sum+=$i} END {print sum+0}' || true)
     if [ -z "$cur_irq" ] || [ "$cur_irq" -eq 0 ]; then
         cur_irq=$(cat /sys/class/net/$EXT_IFACE/statistics/rx_packets 2>/dev/null || echo "0")
     fi
@@ -79,13 +79,13 @@ while true; do
     if [ "$delta_irq" -lt 0 ]; then delta_irq=0; fi
     prev_irq=$cur_irq
     
-    cur_soft_rx=$(grep "NET_RX:" /proc/softirqs | awk '{sum=0; for(i=2;i<=NF;i++) sum+=$i; print sum}' || true)
+    cur_soft_rx=$(grep "NET_RX:" /proc/softirqs | awk '{for(i=2;i<=NF;i++) sum+=$i} END {print sum+0}' || true)
     if [ -z "$cur_soft_rx" ]; then cur_soft_rx=0; fi
     delta_soft_rx=$((cur_soft_rx - prev_soft_rx))
     if [ "$delta_soft_rx" -lt 0 ]; then delta_soft_rx=0; fi
     prev_soft_rx=$cur_soft_rx
     
-    cur_soft_tx=$(grep "NET_TX:" /proc/softirqs | awk '{sum=0; for(i=2;i<=NF;i++) sum+=$i; print sum}' || true)
+    cur_soft_tx=$(grep "NET_TX:" /proc/softirqs | awk '{for(i=2;i<=NF;i++) sum+=$i} END {print sum+0}' || true)
     if [ -z "$cur_soft_tx" ]; then cur_soft_tx=0; fi
     delta_soft_tx=$((cur_soft_tx - prev_soft_tx))
     if [ "$delta_soft_tx" -lt 0 ]; then delta_soft_tx=0; fi
@@ -123,7 +123,7 @@ while true; do
     prev_xdp_drop=$cur_xdp_drop
     
     # 7. Iptables
-    cur_ipt_drop=$(iptables -nvL | grep "DROP" | awk '{sum+=$1} END {print sum}' || true)
+    cur_ipt_drop=$(iptables -nvL | grep "DROP" | awk '{sum+=$1} END {print sum+0}' || true)
     if [ -z "$cur_ipt_drop" ]; then cur_ipt_drop=0; fi
     delta_ipt_drop=$((cur_ipt_drop - prev_iptables_drop))
     # Chống âm khi flush rules
