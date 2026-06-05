@@ -52,8 +52,8 @@ FW_PID=$!
 echo "[*] Kích hoạt Apache Monitor (Victim VM)..."
 ssh $USER@$VICTIM_IP "nohup $REMOTE_DIR/victim/monitor_apache.sh $SCENARIO >/tmp/mon.log 2>&1 &"
 
-echo "[*] Kích hoạt Legitimate Client (Attacker VM) trong netns legit_client..."
-ssh $USER@$ATTACKER_IP "nohup ip netns exec legit_client python3 $REMOTE_DIR/attacker/legit_client.py $SCENARIO >/tmp/legit.log 2>&1 &"
+echo "[*] Kích hoạt Legitimate Client (Attacker VM) trong netns legit..."
+ssh $USER@$ATTACKER_IP "nohup ip netns exec legit python3 $REMOTE_DIR/attacker/legit_client.py $SCENARIO >/tmp/legit.log 2>&1 &"
 
 log_event "baseline_start" "Bắt đầu đo Baseline 30s"
 sleep 30

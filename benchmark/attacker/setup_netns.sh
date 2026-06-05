@@ -23,7 +23,7 @@ VICTIM_NET="10.10.2.0/24"   # Mạng phía Victim
 
 # Khai báo danh sách Namespace và IP tương ứng
 declare -A NS_LIST=(
-    ["legit_client"]="10.10.1.3"
+    ["legit"]="10.10.1.3"
     ["ns6"]="10.10.1.6"
     ["ns7"]="10.10.1.7"
     ["ns8"]="10.10.1.8"
