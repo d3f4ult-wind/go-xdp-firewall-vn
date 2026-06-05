@@ -111,13 +111,15 @@ while true; do
     
     # 6. XDP
     # Tính tổng xdp_run bằng JSON để chống lỗi Parse Version
-    cur_xdp_run=$(bpftool prog show name xdp_packet_filter -j 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '[]'); d=d if isinstance(d, list) else [d]; print(sum(p.get('run_cnt',0) for p in d))" 2>/dev/null || echo "0")
+    cur_xdp_run=$(bpftool prog show name xdp_packet_filter -j 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '[]'); d=d if isinstance(d, list) else [d]; print(sum(p.get('run_cnt',0) for p in d))" 2>/dev/null || true)
+    cur_xdp_run=${cur_xdp_run:-0}
     delta_xdp_run=$((cur_xdp_run - prev_xdp_run))
     if [ "$delta_xdp_run" -lt 0 ]; then delta_xdp_run=0; fi
     prev_xdp_run=$cur_xdp_run
     
     # Đọc tổng số Drop từ Map mitigation_stats (PERCPU). Index 3,4,5 tương ứng Drop/Block.
-    cur_xdp_drop=$(bpftool map dump name mitigation_stats -j 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '[]'); print(sum(sum(v.get('value',0) for v in e.get('values',[])) for e in d if isinstance(e, dict) and e.get('key') in [3,4,5]))" 2>/dev/null || echo "0")
+    cur_xdp_drop=$(bpftool map dump name mitigation_stats -j 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '[]'); print(sum(sum(v.get('value',0) for v in e.get('values',[])) for e in d if isinstance(e, dict) and e.get('key') in [3,4,5]))" 2>/dev/null || true)
+    cur_xdp_drop=${cur_xdp_drop:-0}
     delta_xdp_drop=$((cur_xdp_drop - prev_xdp_drop))
     if [ "$delta_xdp_drop" -lt 0 ]; then delta_xdp_drop=0; fi
     prev_xdp_drop=$cur_xdp_drop
