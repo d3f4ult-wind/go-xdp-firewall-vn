@@ -14,30 +14,88 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-EXT_IFACE="enp0s8"
-LEGIT_IP="10.10.1.3/24"
-GATEWAY="10.10.1.1"
+set -euo pipefail
 
-echo "[*] Xóa namespace cũ nếu có..."
-ip netns del legit_client 2>/dev/null
-ip link del macvlan-legit 2>/dev/null
+# ================= CẤU HÌNH =================
+OUT_IFACE="enp0s8"          # Interface vật lý nối tới Firewall
+FW_IP="10.10.1.1"           # IP Firewall phía Attacker
+VICTIM_NET="10.10.2.0/24"   # Mạng phía Victim
 
-echo "[*] Tạo namespace legit_client..."
-ip netns add legit_client
+# Khai báo danh sách Namespace và IP tương ứng
+declare -A NS_LIST=(
+    ["legit_client"]="10.10.1.3"
+    ["ns6"]="10.10.1.6"
+    ["ns7"]="10.10.1.7"
+    ["ns8"]="10.10.1.8"
+    ["ns9"]="10.10.1.9"
+    ["ns10"]="10.10.1.10"
+)
+TRANSIT_PREFIX="10.254.0"   # Dải IP transit nội bộ
+IDX=10
 
-echo "[*] Tạo macvlan interface nối với $EXT_IFACE..."
-ip link add macvlan-legit link $EXT_IFACE type macvlan mode bridge
+# ================= DỌN DẸP =================
+echo "[*] Đang dọn dẹp namespace/veth cũ..."
+for ns in "${!NS_LIST[@]}"; do
+    ip netns del $ns 2>/dev/null || true
+    ip link del "veth_${ns}" 2>/dev/null || true
+done
 
-echo "[*] Gán macvlan vào namespace legit_client..."
-ip link set macvlan-legit netns legit_client
+# ================= SYSCTL TOÀN CỤC =================
+echo "[*] Điều chỉnh sysctl kernel cho lab DDoS..."
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.conf.default.rp_filter=0 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.conf.${OUT_IFACE}.rp_filter=0 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.conf.${OUT_IFACE}.accept_local=1 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.conf.all.accept_local=1 >/dev/null 2>&1 || true
+sysctl -w net.ipv4.conf.${OUT_IFACE}.proxy_arp=1 >/dev/null 2>&1 || true
 
-echo "[*] Cấu hình IP $LEGIT_IP cho legit_client..."
-ip netns exec legit_client ip addr add $LEGIT_IP dev macvlan-legit
-ip netns exec legit_client ip link set macvlan-legit up
-ip netns exec legit_client ip link set lo up
+# ================= ROUTE TRÊN HOST =================
+echo "[*] Thiết lập route tới Victim qua Firewall..."
+ip route add ${VICTIM_NET} via ${FW_IP} dev ${OUT_IFACE} 2>/dev/null || true
 
-# Route traffic qua Firewall
-ip netns exec legit_client ip route add default via $GATEWAY
+# ================= TẠO NAMESPACE & VETH =================
+echo "[*] Đang tạo namespaces..."
+for ns in "${!NS_LIST[@]}"; do
+    ATTACK_IP="${NS_LIST[$ns]}"
+    VETH_HOST="veth_${ns}"
+    VETH_NS="veth_${ns}_in"
+    
+    # Sinh IP transit hợp lệ
+    HOST_VETH_IP="${TRANSIT_PREFIX}.${IDX}"
 
-echo "[OK] Setup Netns hoàn tất. Test ping tới Victim (10.10.2.2)..."
-ip netns exec legit_client ping -c 2 10.10.2.2 || echo "[WARNING] Không ping được Victim. Hãy kiểm tra lại routing của Firewall VM."
+    echo "[+] Thiết lập $ns (IP: $ATTACK_IP)..."
+
+    # 1. Tạo netns và veth pair
+    ip netns add $ns
+    ip link add $VETH_HOST type veth peer name $VETH_NS
+    ip link set $VETH_NS netns $ns
+
+    # 2. Cấu hình TRONG netns
+    ip netns exec $ns ip addr add ${ATTACK_IP}/32 dev $VETH_NS
+    ip netns exec $ns ip link set $VETH_NS up
+    ip netns exec $ns ip link set lo up
+    # Route default trỏ về host
+    ip netns exec $ns ip route add default via ${HOST_VETH_IP} dev $VETH_NS onlink
+
+    # 3. Cấu hình TRÊN HOST
+    ip addr add ${HOST_VETH_IP}/30 dev $VETH_HOST
+    ip link set $VETH_HOST up
+    ip link set $VETH_HOST txqueuelen 10000
+    # Route định hướng packet reply từ Victim vào đúng netns
+    ip route add ${ATTACK_IP}/32 dev $VETH_HOST
+
+    # 4. Sysctl riêng cho veth host
+    sysctl -w net.ipv4.conf.${VETH_HOST}.proxy_arp=1 >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.conf.${VETH_HOST}.accept_local=1 >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.conf.${VETH_HOST}.rp_filter=0 >/dev/null 2>&1 || true
+
+    echo "    ↳ $ns: ${ATTACK_IP} -> ${HOST_VETH_IP} -> ${OUT_IFACE}"
+    IDX=$((IDX + 2))
+done
+
+echo "[OK] Setup Netns hoàn tất."
+echo "[*] Đang kiểm tra ping tới Victim (10.10.2.2)..."
+for ns in "${!NS_LIST[@]}"; do
+    ip netns exec $ns ping -c 1 -W 1 10.10.2.2 >/dev/null 2>&1 && echo "    [+] Ping từ $ns OK" || echo "    [-] Ping từ $ns FAILED"
+done

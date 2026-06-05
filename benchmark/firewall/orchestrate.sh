@@ -20,7 +20,8 @@ fi
 
 ATTACKER_IP="10.10.1.2"
 VICTIM_IP="10.10.2.2"
-USER="root" # Cần sửa lại user nếu ssh user khác
+USER="kali" # Cần sửa lại user nếu ssh user khác
+REMOTE_DIR="~/go-xdp-firewall-vn/benchmark" # Thư mục chứa code trên các VM
 
 TS=$(date +"%Y%m%d_%H%M%S")
 OUT_DIR="results_${SCENARIO}_${TS}"
@@ -49,17 +50,17 @@ echo "[*] Kích hoạt Firewall Metric Collector..."
 FW_PID=$!
 
 echo "[*] Kích hoạt Apache Monitor (Victim VM)..."
-ssh $USER@$VICTIM_IP "nohup /root/benchmark/victim/monitor_apache.sh $SCENARIO >/tmp/mon.log 2>&1 &"
+ssh $USER@$VICTIM_IP "nohup $REMOTE_DIR/victim/monitor_apache.sh $SCENARIO >/tmp/mon.log 2>&1 &"
 
 echo "[*] Kích hoạt Legitimate Client (Attacker VM) trong netns legit_client..."
-ssh $USER@$ATTACKER_IP "nohup ip netns exec legit_client python3 /root/benchmark/attacker/legit_client.py $SCENARIO >/tmp/legit.log 2>&1 &"
+ssh $USER@$ATTACKER_IP "nohup ip netns exec legit_client python3 $REMOTE_DIR/attacker/legit_client.py $SCENARIO >/tmp/legit.log 2>&1 &"
 
 log_event "baseline_start" "Bắt đầu đo Baseline 30s"
 sleep 30
 
 # 2. Phát động tấn công
 log_event "attack_start" "Phát động tấn công từ Attacker VM"
-ssh $USER@$ATTACKER_IP "nohup /root/benchmark/attacker/$ATTACK_SCRIPT >/tmp/attack.log 2>&1 &"
+ssh $USER@$ATTACKER_IP "nohup $REMOTE_DIR/attacker/$ATTACK_SCRIPT >/tmp/attack.log 2>&1 &"
 if [ $? -eq 0 ]; then
     echo "[OK] Đã gửi lệnh tấn công thành công!"
 else
