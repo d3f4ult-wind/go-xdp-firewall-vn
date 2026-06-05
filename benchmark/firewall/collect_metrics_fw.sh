@@ -6,7 +6,8 @@
 #           Iptables mỗi 1 giây và ghi ra CSV tính Delta.
 # =============================================================
 
-set -euo pipefail
+# Bỏ -e để tránh collector tự kill khi lệnh phụ (bpftool, conntrack) fail
+set -uo pipefail
 
 # Xử lý dọn dẹp khi bị tắt bằng Orchestrator
 trap "echo '[*] Dừng thu thập Metric Firewall...'; exit 0" SIGINT SIGTERM
@@ -111,14 +112,45 @@ while true; do
     
     # 6. XDP
     # Tính tổng xdp_run bằng JSON để chống lỗi Parse Version
-    cur_xdp_run=$(bpftool prog show name xdp_packet_filter -j 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '[]'); d=d if isinstance(d, list) else [d]; print(sum(p.get('run_cnt',0) for p in d))" 2>/dev/null || true)
+    cur_xdp_run=$(bpftool prog show name xdp_packet_filter -j 2>/dev/null | python3 -c "
+import sys,json
+try:
+    d=json.loads(sys.stdin.read() or '[]')
+    d=d if isinstance(d,list) else [d]
+    print(sum(int(p.get('run_cnt',0)) for p in d if isinstance(p,dict)))
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
     cur_xdp_run=${cur_xdp_run:-0}
     delta_xdp_run=$((cur_xdp_run - prev_xdp_run))
     if [ "$delta_xdp_run" -lt 0 ]; then delta_xdp_run=0; fi
     prev_xdp_run=$cur_xdp_run
     
     # Đọc tổng số Drop từ Map mitigation_stats (PERCPU). Index 3,4,5 tương ứng Drop/Block.
-    cur_xdp_drop=$(bpftool map dump name mitigation_stats -j 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '[]'); print(sum(sum(v.get('value',0) for v in e.get('values',[])) for e in d if isinstance(e, dict) and e.get('key') in [3,4,5]))" 2>/dev/null || true)
+    # Fix: bpftool PERCPU_ARRAY key có thể là int (3) hoặc hex string ("0x00000003")
+    # Cần convert về int trước khi so sánh. Index 3=syn_dropped, 4=udp_dropped, 5=icmp_dropped
+    cur_xdp_drop=$(bpftool map dump name mitigation_stats -j 2>/dev/null | python3 -c "
+import sys,json
+try:
+    d=json.loads(sys.stdin.read() or '[]')
+    total=0
+    for e in d:
+        if not isinstance(e,dict): continue
+        k=e.get('key','')
+        # Convert hex string '0x00000003' hoặc byte list sang int
+        if isinstance(k,str):
+            try: k=int(k,16)
+            except: k=-1
+        elif isinstance(k,list):
+            try: k=int.from_bytes(bytes(k),'little')
+            except: k=-1
+        if k in (3,4,5):
+            vals=e.get('values',[])
+            total+=sum(int(v.get('value',0)) for v in vals if isinstance(v,dict))
+    print(total)
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
     cur_xdp_drop=${cur_xdp_drop:-0}
     delta_xdp_drop=$((cur_xdp_drop - prev_xdp_drop))
     if [ "$delta_xdp_drop" -lt 0 ]; then delta_xdp_drop=0; fi

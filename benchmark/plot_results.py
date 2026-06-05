@@ -18,37 +18,45 @@ def main():
 
     # Tìm các file CSV trong thư mục
     fw_files = glob.glob(os.path.join(res_dir, "metrics_firewall_*.csv"))
-    vic_files = glob.glob(os.path.join(res_dir, "log_victim_*.csv"))
+    vic_files = glob.glob(os.path.join(res_dir, "legit_*.csv"))
     evt_file = os.path.join(res_dir, "timeline_events.csv")
 
-    if not fw_files or not vic_files or not os.path.exists(evt_file):
-        print("Lỗi: Không tìm thấy đủ 3 file CSV (firewall, victim, timeline) trong thư mục này.")
+    if not fw_files or not os.path.exists(evt_file):
+        print("Lỗi: Không tìm thấy đủ file CSV (firewall, timeline) trong thư mục này.")
         sys.exit(1)
 
     print(f"[*] Đang đọc dữ liệu từ: {res_dir}")
     df_fw = pd.read_csv(fw_files[0])
-    df_vic = pd.read_csv(vic_files[0])
     df_evt = pd.read_csv(evt_file)
+    
+    df_vic = None
+    if vic_files:
+        df_vic = pd.read_csv(vic_files[0])
+    else:
+        print("[!] Cảnh báo: Không tìm thấy file victim (legit_*.csv), sẽ bỏ qua biểu đồ victim.")
 
     # Lấy mốc thời gian nhỏ nhất làm giây số 0
-    start_time = min(df_fw['timestamp_unix_ms'].min(), df_vic['timestamp_unix_ms'].min())
+    start_time = df_fw['timestamp_unix_ms'].min()
+    if df_vic is not None:
+        start_time = min(start_time, df_vic['timestamp_unix_ms'].min())
     
     # Chuyển đổi ms sang giây tương đối (Relative seconds)
     df_fw['time_sec'] = (df_fw['timestamp_unix_ms'] - start_time) / 1000.0
-    df_vic['time_sec'] = (df_vic['timestamp_unix_ms'] - start_time) / 1000.0
     df_evt['time_sec'] = (df_evt['timestamp_unix_ms'] - start_time) / 1000.0
+    if df_vic is not None:
+        df_vic['time_sec'] = (df_vic['timestamp_unix_ms'] - start_time) / 1000.0
 
     # Thiết lập kích thước bảng vẽ
-    plt.figure(figsize=(16, 12))
+    num_subplots = 4 if df_vic is not None else 3
+    plt.figure(figsize=(16, 4 * num_subplots))
     plt.rcParams.update({'font.size': 10})
 
     # ==========================================
     # BIỂU ĐỒ 1: Tải trọng CPU (Firewall vs Victim)
     # ==========================================
-    ax1 = plt.subplot(3, 1, 1)
+    ax1 = plt.subplot(num_subplots, 1, 1)
     plt.plot(df_fw['time_sec'], df_fw['cpu_all'], label='Firewall CPU %', color='blue', linewidth=2)
-    plt.plot(df_vic['time_sec'], df_vic['cpu_usage'], label='Victim CPU %', color='red', linewidth=2)
-    plt.title('1. Tải trọng CPU (CPU Usage Comparison)', fontsize=14, fontweight='bold')
+    plt.title('1. Tải trọng CPU (Firewall CPU Usage)', fontsize=14, fontweight='bold')
     plt.ylabel('CPU Usage (%)')
     plt.ylim(-5, 105)
     plt.legend(loc='upper right')
@@ -62,7 +70,7 @@ def main():
     # ==========================================
     # BIỂU ĐỒ 2: Năng lực xử lý gói tin (Mitigation PPS)
     # ==========================================
-    plt.subplot(3, 1, 2, sharex=ax1)
+    plt.subplot(num_subplots, 1, 2, sharex=ax1)
     plt.plot(df_fw['time_sec'], df_fw['ext_rx_pps'], label='Total RX PPS (Gói tin vào)', color='black', alpha=0.5, linestyle=':')
     plt.plot(df_fw['time_sec'], df_fw['xdp_run_pps'], label='XDP Run PPS', color='orange', linewidth=1.5)
     plt.plot(df_fw['time_sec'], df_fw['xdp_drop_pps'], label='XDP Drop PPS (Đã chặn ở eBPF)', color='green', linewidth=2)
@@ -78,17 +86,38 @@ def main():
     # ==========================================
     # BIỂU ĐỒ 3: Trạng thái Conntrack
     # ==========================================
-    plt.subplot(3, 1, 3, sharex=ax1)
+    plt.subplot(num_subplots, 1, 3, sharex=ax1)
     plt.plot(df_fw['time_sec'], df_fw['conntrack_count'], label='Total Conntrack Entries', color='purple', linewidth=2)
     plt.plot(df_fw['time_sec'], df_fw['conntrack_syn_sent'], label='SYN_SENT (Half-open)', color='magenta', linestyle='--')
     plt.title('3. Quá tải bảng trạng thái (Conntrack Table Size)', fontsize=14, fontweight='bold')
-    plt.xlabel('Thời gian thử nghiệm (Giây)', fontsize=12)
     plt.ylabel('Số lượng kết nối')
     plt.legend(loc='upper right')
     plt.grid(True, linestyle='--', alpha=0.7)
 
     for _, row in df_evt.iterrows():
         plt.axvline(x=row['time_sec'], color='grey', linestyle='--', alpha=0.4)
+
+    # ==========================================
+    # BIỂU ĐỒ 4: Victim Response Time (Nếu có)
+    # ==========================================
+    if df_vic is not None:
+        plt.subplot(num_subplots, 1, 4, sharex=ax1)
+        # Cột thực tế trong legit_client.py: response_time_ms, status_code, available
+        plt.plot(df_vic['time_sec'], df_vic['response_time_ms'],
+                 label='Response Time (ms)', color='teal', linewidth=1.5, alpha=0.8)
+        unavail = df_vic[df_vic['available'] == 0]
+        if not unavail.empty:
+            plt.scatter(unavail['time_sec'], unavail['response_time_ms'],
+                        color='red', s=20, label='Timeout / Lỗi (available=0)', zorder=5)
+        plt.axhline(y=3000, color='red', linestyle=':', alpha=0.6, label='Timeout threshold (3000ms)')
+        plt.title('4. Availability của Legit Client (Response Time)', fontsize=14, fontweight='bold')
+        plt.xlabel('Thời gian thử nghiệm (Giây)', fontsize=12)
+        plt.ylabel('Response Time (ms)')
+        plt.ylim(-100, 3500)
+        plt.legend(loc='upper right')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        for _, row in df_evt.iterrows():
+            plt.axvline(x=row['time_sec'], color='grey', linestyle='--', alpha=0.4)
 
     # Lưu biểu đồ
     plt.tight_layout()

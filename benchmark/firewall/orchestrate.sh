@@ -62,13 +62,14 @@ ssh -o BatchMode=yes -o ConnectTimeout=2 $USER@$VICTIM_IP "echo 'SSH Victim OK'"
 
 # 1. Bật Metric Collector
 echo "[*] Kích hoạt Firewall Metric Collector..."
-bash ./collect_metrics_fw.sh "$SCENARIO" > /dev/null 2>&1 &
+COLLECTOR_LOG="/tmp/collector_${SCENARIO}.log"
+bash ./collect_metrics_fw.sh "$SCENARIO" > "$COLLECTOR_LOG" 2>&1 &
 FW_PID=$!
-sleep 1
+sleep 2
 if ps -p $FW_PID > /dev/null; then
-    echo "    [+] XÁC NHẬN: Firewall Collector ĐANG CHẠY."
+    echo "    [+] XÁC NHẬN: Firewall Collector ĐANG CHẠY (PID=$FW_PID, log: $COLLECTOR_LOG)."
 else
-    echo "    [!] LỖI NGHIÊM TRỌNG: Firewall Collector KHÔNG CHẠY!"
+    echo "    [!] LỖI NGHIÊM TRỌNG: Firewall Collector KHÔNG CHẠY! Xem log: $COLLECTOR_LOG"
 fi
 
 echo "[*] Kích hoạt Apache Monitor (Victim VM)..."
@@ -110,9 +111,10 @@ ssh $USER@$VICTIM_IP "pkill -f monitor_apache.sh"
 ssh $USER@$ATTACKER_IP "pkill -f legit_client.py"
 
 echo "[*] Đang thu thập CSV từ các VM về Firewall..."
-scp $USER@$VICTIM_IP:/tmp/apache_status_${SCENARIO}_*.csv $OUT_DIR/ 2>/dev/null
-scp $USER@$ATTACKER_IP:/tmp/legit_${SCENARIO}_*.csv $OUT_DIR/ 2>/dev/null
-mv /tmp/metrics_firewall_${SCENARIO}_*.csv $OUT_DIR/
+scp $USER@$VICTIM_IP:/tmp/apache_status_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || true
+scp $USER@$ATTACKER_IP:/tmp/legit_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || true
+# Di chuyển firewall metrics CSV (collector ghi vào /tmp)
+mv /tmp/metrics_firewall_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || echo "    [!] Không tìm thấy metrics_firewall CSV — collector có thể bị crash sớm."
 
 echo "=========================================================="
 echo " ĐÃ HOÀN TẤT! Kết quả được lưu tại: $OUT_DIR"
