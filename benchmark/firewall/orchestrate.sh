@@ -35,6 +35,22 @@ log_event() {
     echo "[$TS_MS] EVENT: $1 ($2)"
 }
 
+check_remote_process() {
+    local ip=$1
+    local proc_name=$2
+    local desc=$3
+    
+    # Chờ 2s để tiến trình kịp bung ra
+    sleep 2
+    ssh -o BatchMode=yes $USER@$ip "pgrep -f '$proc_name' >/dev/null"
+    if [ $? -eq 0 ]; then
+        echo "    [+] XÁC NHẬN: $desc ĐANG CHẠY."
+    else
+        echo "    [!] LỖI NGHIÊM TRỌNG: $desc KHÔNG CHẠY! (Hãy check log /tmp trên $ip)"
+        # Tùy chọn: Thêm 'exit 1' nếu muốn dừng khẩn cấp
+    fi
+}
+
 echo "=========================================================="
 echo " KHỞI ĐỘNG BENCHMARK: $SCENARIO"
 echo "=========================================================="
@@ -46,27 +62,30 @@ ssh -o BatchMode=yes -o ConnectTimeout=2 $USER@$VICTIM_IP "echo 'SSH Victim OK'"
 
 # 1. Bật Metric Collector
 echo "[*] Kích hoạt Firewall Metric Collector..."
-./collect_metrics_fw.sh "$SCENARIO" > /dev/null 2>&1 &
+bash ./collect_metrics_fw.sh "$SCENARIO" > /dev/null 2>&1 &
 FW_PID=$!
+sleep 1
+if ps -p $FW_PID > /dev/null; then
+    echo "    [+] XÁC NHẬN: Firewall Collector ĐANG CHẠY."
+else
+    echo "    [!] LỖI NGHIÊM TRỌNG: Firewall Collector KHÔNG CHẠY!"
+fi
 
 echo "[*] Kích hoạt Apache Monitor (Victim VM)..."
-ssh $USER@$VICTIM_IP "nohup $REMOTE_DIR/victim/monitor_apache.sh $SCENARIO >/tmp/mon.log 2>&1 &"
+ssh $USER@$VICTIM_IP "nohup sudo bash $REMOTE_DIR/victim/monitor_apache.sh $SCENARIO >/tmp/mon.log 2>&1 &"
+check_remote_process $VICTIM_IP "monitor_apache.sh" "Apache Monitor"
 
 echo "[*] Kích hoạt Legitimate Client (Attacker VM) trong netns legit..."
-ssh $USER@$ATTACKER_IP "nohup ip netns exec legit python3 $REMOTE_DIR/attacker/legit_client.py $SCENARIO >/tmp/legit.log 2>&1 &"
+ssh $USER@$ATTACKER_IP "nohup sudo ip netns exec legit python3 $REMOTE_DIR/attacker/legit_client.py $SCENARIO >/tmp/legit.log 2>&1 &"
+check_remote_process $ATTACKER_IP "legit_client.py" "Legitimate Client"
 
 log_event "baseline_start" "Bắt đầu đo Baseline 30s"
 sleep 30
 
 # 2. Phát động tấn công
 log_event "attack_start" "Phát động tấn công từ Attacker VM"
-ssh $USER@$ATTACKER_IP "nohup $REMOTE_DIR/attacker/$ATTACK_SCRIPT >/tmp/attack.log 2>&1 &"
-if [ $? -eq 0 ]; then
-    echo "[OK] Đã gửi lệnh tấn công thành công!"
-else
-    echo "[ERROR] Lệnh SSH phát động tấn công thất bại!"
-    # Vẫn tiếp tục hoặc exit tùy bạn
-fi
+ssh $USER@$ATTACKER_IP "nohup sudo bash $REMOTE_DIR/attacker/$ATTACK_SCRIPT >/tmp/attack.log 2>&1 &"
+check_remote_process $ATTACKER_IP "$ATTACK_SCRIPT" "Mã nguồn Tấn công ($ATTACK_SCRIPT)"
 
 # Chờ 15s để xem XDP bật chưa
 sleep 15

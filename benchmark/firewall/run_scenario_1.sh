@@ -18,8 +18,5 @@ echo "          Tốc độ XDP_DROP tăng đột biến."
 echo "=========================================================="
 sleep 2
 
-# Cấp quyền thực thi trước khi gọi
-ssh kali@10.10.1.2 "chmod +x ~/go-xdp-firewall-vn/benchmark/attacker/$ATTACK_SCRIPT"
-
 # Gọi Master Orchestrator
-./orchestrate.sh "$SCENARIO" "$ATTACK_SCRIPT"
+bash ./orchestrate.sh "$SCENARIO" "$ATTACK_SCRIPT"
