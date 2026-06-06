@@ -120,7 +120,9 @@ try:
     print(sum(int(p.get('run_cnt',0)) for p in d if isinstance(p,dict)))
 except Exception:
     print(0)
-" 2>/dev/null || echo 0)
+" 2>/dev/null || true)
+    # Lấy dòng đầu tiên, loại bỏ khoảng trắng, fallback về 0 nếu rỗng
+    cur_xdp_run=$(echo "${cur_xdp_run:-0}" | head -1 | tr -d '[:space:]')
     cur_xdp_run=${cur_xdp_run:-0}
     delta_xdp_run=$((cur_xdp_run - prev_xdp_run))
     if [ "$delta_xdp_run" -lt 0 ]; then delta_xdp_run=0; fi
@@ -137,7 +139,6 @@ try:
     for e in d:
         if not isinstance(e,dict): continue
         k=e.get('key','')
-        # Convert hex string '0x00000003' hoặc byte list sang int
         if isinstance(k,str):
             try: k=int(k,16)
             except: k=-1
@@ -150,7 +151,8 @@ try:
     print(total)
 except Exception:
     print(0)
-" 2>/dev/null || echo 0)
+" 2>/dev/null || true)
+    cur_xdp_drop=$(echo "${cur_xdp_drop:-0}" | head -1 | tr -d '[:space:]')
     cur_xdp_drop=${cur_xdp_drop:-0}
     delta_xdp_drop=$((cur_xdp_drop - prev_xdp_drop))
     if [ "$delta_xdp_drop" -lt 0 ]; then delta_xdp_drop=0; fi
