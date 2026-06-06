@@ -69,6 +69,13 @@ else
     echo "    [!] CẢNH BÁO: Không thêm được trusted IP (HTTP $TRUSTED_RESP). Legit có thể bị drop!"
 fi
 
+# --- Thêm Legit vào iptables WHITELIST (ipset) ---
+# Không có bước này, packet của legit rơi vào DROP-DEFAULT
+# → IptablesTailer block chính legit trước cả attacker!
+echo "[*] Thêm Legit Client ($LEGIT_IP) vào iptables WHITELIST (ipset ddos_whitelist)..."
+ipset add ddos_whitelist "$LEGIT_IP" 2>/dev/null || true
+echo "    [+] $LEGIT_IP đã được whitelist trong iptables."
+
 # --- PRE-FLIGHT 6: Bật Tier 1 AutoMode (Watcher sẽ tự escalate) ---
 echo "[*] Bật Tier 1 AutoMode (Watcher sẽ tự điều chỉnh Protection Level)..."
 curl -s -X POST "$FW_API/tier1/watcher" \

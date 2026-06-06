@@ -64,6 +64,14 @@ curl -s -X POST "$FW_API/tier1/watcher" \
     -d '{"auto_mode": false}' > /dev/null
 echo "    [+] AutoMode = OFF."
 
+# --- PRE-FLIGHT 6: Thêm Legit Client vào iptables WHITELIST_SET ---
+# Quan trọng: Nếu không có, mọi packet từ legit sẽ rơi vào DROP-DEFAULT
+# -> IptablesTailer sẽ block chính legit client trước cả attacker!
+LEGIT_IP="10.10.1.3"
+echo "[*] Thêm Legit Client ($LEGIT_IP) vào iptables WHITELIST (ipset ddos_whitelist)..."
+ipset add ddos_whitelist "$LEGIT_IP" 2>/dev/null || true
+echo "    [+] $LEGIT_IP đã được whitelist trong iptables."
+
 echo ""
 echo "[*] Pre-flight hoàn tất. Bắt đầu sau 3 giây..."
 sleep 3
