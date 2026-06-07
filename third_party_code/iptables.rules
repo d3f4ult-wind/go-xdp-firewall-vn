@@ -465,6 +465,15 @@ iptables -A FORWARD -i "$IFACE_IN" \
     -m set --match-set "$WHITELIST_SET" src \
     -j ACCEPT
 
+# ICMP từ bất kỳ IP nào với rate ≤ 5/s (ping bình thường, không phải flood)
+# FIX: Thiếu rule này khiến mọi ping từ non-whitelist rơi vào DROP-DEFAULT
+# ngay lập tức → IptablesTailer block oan IP hợp lệ chưa kịp vào whitelist.
+# LAYER3_PROTECT đã có rule LOG+DROP cho ICMP flood (>5/s) nên rule này an toàn.
+iptables -A FORWARD -i "$IFACE_IN" \
+    -p icmp --icmp-type echo-request \
+    -m limit --limit 5/second --limit-burst 10 \
+    -j ACCEPT
+
 # 9. DROP default
 iptables -A FORWARD -i "$IFACE_IN" \
     -j LOG --log-prefix "${LOG_PREFIX}DROP-DEFAULT " --log-level 4

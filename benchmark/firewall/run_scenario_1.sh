@@ -11,7 +11,7 @@
 # =============================================================
 
 SCENARIO="sc1_botnet"
-ATTACK_SCRIPT="attack_sc1_botnet.sh"
+ATTACK_SCRIPT="attack_sc1_botnet_v2.sh"
 FW_API="http://localhost:8080"
 
 echo "=========================================================="
