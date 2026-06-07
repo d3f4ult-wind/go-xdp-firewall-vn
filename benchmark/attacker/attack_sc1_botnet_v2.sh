@@ -54,3 +54,5 @@ echo ""
 echo "[*] [ATTACKER-v2] Tấn công ĐÃ KÍCH HOẠT!"
 echo "    $LAUNCHED tiến trình hping3 đang bắn SYN từ các IP CN ngẫu nhiên."
 echo "    PIDs lưu tại: /tmp/sc1_botnet_v2.pids"
+echo "[*] Đang giữ script sống để duy trì tấn công qua SSH... (Chờ lệnh pkill từ Orchestrator)"
+wait
