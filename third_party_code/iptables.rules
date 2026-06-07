@@ -234,6 +234,9 @@ iptables -A LAYER3_PROTECT -f \
 iptables -A LAYER3_PROTECT -f -j DROP
 
 # --- L3-4: IGMP FLOOD ---
+# Bỏ qua IGMP từ mạng lab (tránh trường hợp Attacker VM 10.10.1.2 tự gửi IGMP report vô tình bị block)
+iptables -A LAYER3_PROTECT -p igmp -s "$LAB_NETWORK" -j RETURN
+
 # IGMP (protocol 2) chỉ dùng nội bộ cho multicast
 iptables -A LAYER3_PROTECT -p igmp \
     -m set ! --match-set "$WHITELIST_SET" src \
@@ -452,11 +455,13 @@ iptables -A FORWARD -i "$IFACE_IN" \
 # 7. Auto blacklist threshold
 iptables -A FORWARD -i "$IFACE_IN" -j AUTO_BLACKLIST
 
-# 8. Service rules — HTTP/HTTPS từ whitelist
+# 8. Service rules — HTTP/HTTPS
+# SỬA LỖI: Cần cho phép TẤT CẢ các IP tạo kết nối NEW tới web (nếu chúng không bị rate-limit chặn ở trên).
+# Nếu chỉ cho phép WHITELIST_SET, mọi normal IP (hoặc attacker dùng IP thật như Slowloris)
+# sẽ bị rớt xuống DROP-DEFAULT và bị block oan ngay lập tức.
 iptables -A FORWARD -i "$IFACE_IN" \
     -p tcp -m multiport --dports 80,443,8080 \
     -m conntrack --ctstate NEW \
-    -m set --match-set "$WHITELIST_SET" src \
     -j ACCEPT
 
 # ICMP từ whitelist
@@ -474,10 +479,10 @@ iptables -A FORWARD -i "$IFACE_IN" \
     -m limit --limit 5/second --limit-burst 10 \
     -j ACCEPT
 
-# 9. DROP default
+# 9. ACCEPT default (Tạm thời cho Benchmark Best Case)
 iptables -A FORWARD -i "$IFACE_IN" \
-    -j LOG --log-prefix "${LOG_PREFIX}DROP-DEFAULT " --log-level 4
-iptables -A FORWARD -i "$IFACE_IN" -j DROP
+    -j LOG --log-prefix "${LOG_PREFIX}ACCEPT-DEFAULT " --log-level 4
+iptables -A FORWARD -i "$IFACE_IN" -j ACCEPT
 
 # Traffic reply từ Victim về Attacker
 iptables -A FORWARD -i "$IFACE_OUT" -j ACCEPT

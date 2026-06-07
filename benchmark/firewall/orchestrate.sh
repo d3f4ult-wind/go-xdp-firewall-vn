@@ -97,7 +97,7 @@ sleep 15
 
 # 3. Dừng tấn công
 log_event "attack_stop" "Gửi lệnh dừng tấn công"
-ssh $USER@$ATTACKER_IP "pkill hping3; pkill python; pkill slowloris"
+ssh $USER@$ATTACKER_IP "pkill hping3; pkill -f hping3_cidr.sh; pkill python; pkill slowloris"
 
 # 4. Recovery
 log_event "recovery_start" "Bắt đầu đo Recovery 30s"
