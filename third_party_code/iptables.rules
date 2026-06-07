@@ -481,7 +481,7 @@ iptables -A FORWARD -i "$IFACE_IN" \
 
 # 9. ACCEPT default (Tạm thời cho Benchmark Best Case)
 iptables -A FORWARD -i "$IFACE_IN" \
-    -j LOG --log-prefix "${LOG_PREFIX}ACCEPT-DEFAULT " --log-level 4
+    -j LOG --log-prefix "[FW-ALLOW] ACCEPT-DEFAULT " --log-level 4
 iptables -A FORWARD -i "$IFACE_IN" -j ACCEPT
 
 # Traffic reply từ Victim về Attacker
