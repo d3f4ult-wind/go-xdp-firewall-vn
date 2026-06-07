@@ -27,7 +27,7 @@ alert tcp any any -> $HOME_NET 80 (msg:"SLOWLORIS Excessive new TCP connections 
 # mỗi packet chỉ vài byte. dsize < 50 bắt các packet "nhỏ giọt" bất thường.
 # FIX v2: Dùng http.method sticky buffer thay vì content:"GET" trên raw TCP
 #         để tránh false positive khi "GET" xuất hiện trong payload không liên quan.
-alert http any any -> $HOME_NET 80 (msg:"SLOWLORIS Tiny HTTP payload - possible partial header drip"; flow:established,to_server; http.method; content:"GET"; dsize:<50; threshold: type threshold, track by_src, count 10, seconds 30; sid:9000002; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP;)
+alert http any any -> $HOME_NET 80 (msg:"SLOWLORIS Tiny HTTP payload - possible partial header drip"; flow:established,to_server; http.method; content:"GET"; dsize:<50; threshold: type threshold, track by_src, count 1000, seconds 30; sid:9000002; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP;)
 
 # Rule 3: Header "X-a:" là dấu vết đặc trưng của tool Slowloris gốc (perl script).
 # Tool mặc định gửi header giả "X-a: b" để duy trì connection.
@@ -72,12 +72,12 @@ alert http any any -> $HOME_NET 80 (msg:"RUDY Repeated POST to form endpoint"; f
 
 # Rule 8: Volume GET cao từ một IP — ngưỡng 100 request/10s.
 # User bình thường hiếm khi vượt quá 20-30 request trong 10 giây.
-alert http any any -> $HOME_NET 80 (msg:"HTTP GET FLOOD High volume GET requests from single source"; flow:established,to_server; http.method; content:"GET"; threshold: type threshold, track by_src, count 100, seconds 10; sid:9002001; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP;)
+alert http any any -> $HOME_NET 80 (msg:"HTTP GET FLOOD High volume GET requests from single source"; flow:established,to_server; http.method; content:"GET"; threshold: type threshold, track by_src, count 1000, seconds 10; sid:9002001; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP;)
 
 # Rule 9: GET Flood nhắm vào một URL cụ thể (index, homepage).
 # Attacker thường tập trung vào trang nặng nhất để tối đa hoá thiệt hại.
 # FIX v2: Thêm http.uri; trước content:"/" để gắn đúng buffer URI.
-alert http any any -> $HOME_NET 80 (msg:"HTTP GET FLOOD Concentrated requests to single URI"; flow:established,to_server; http.method; content:"GET"; http.uri; content:"/"; threshold: type both, track by_src, count 200, seconds 30; sid:9002002; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP_Root;)
+alert http any any -> $HOME_NET 80 (msg:"HTTP GET FLOOD Concentrated requests to single URI"; flow:established,to_server; http.method; content:"GET"; http.uri; content:"/"; threshold: type both, track by_src, count 2000, seconds 30; sid:9002002; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP_Root;)
 
 # Rule 10: GET không có User-Agent — tool đơn giản thường bỏ qua header này.
 # Hầu hết browser thực đều gửi User-Agent, nên thiếu header này là dấu hiệu đáng ngờ.

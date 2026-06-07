@@ -15,7 +15,7 @@ TARGET="http://10.10.2.2/health.php"
 
 # wrk params: Giữ thấp dưới ngưỡng Suricata để không bị block
 # sid:9000001: TCP SYN > 20 conn/10s → giữ conns ≤ 5
-# sid:9002001: HTTP GET > 100 req/10s → wrk 2t×2c ~40-80 req/s = an toàn
+# sid:9002001: HTTP GET > 1000 req/10s → wrk 2t×2c ~40-80 req/s = an toàn
 # sid:9002003: Missing User-Agent → thêm header
 WRK_THREADS=2
 WRK_CONNS=2
