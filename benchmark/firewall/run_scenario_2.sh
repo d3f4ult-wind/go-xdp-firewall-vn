@@ -83,6 +83,14 @@ curl -s -X POST "$FW_API/tier1/watcher" \
     -d '{"auto_mode": true}' > /dev/null
 echo "    [+] AutoMode = ON."
 
+# --- PRE-FLIGHT 7: Bật BPF Stats (BẮT BUỘC để đo xdp_run_pps / xdp_drop_pps) ---
+# Nếu thiếu lệnh này, bpftool prog show trả về run_cnt=0 mãi mãi
+# → Biểu đồ "Năng lực đánh chặn" sẽ trống hoàn toàn dù XDP đang hoạt động.
+echo "[*] Bật BPF Program Stats (kernel.bpf_stats_enabled=1)..."
+sysctl -w kernel.bpf_stats_enabled=1 > /dev/null
+echo "    [+] BPF Stats = ON."
+
+
 echo ""
 echo "[*] Pre-flight hoàn tất. Watcher sẽ tự escalate khi phát hiện flood."
 echo "[*] Bắt đầu sau 3 giây..."

@@ -80,6 +80,10 @@ echo "[*] Kích hoạt Legitimate Client (Attacker VM) trong netns legit..."
 ssh $USER@$ATTACKER_IP "nohup sudo ip netns exec legit python3 $REMOTE_DIR/attacker/legit_client.py $SCENARIO >/tmp/legit.log 2>&1 &"
 check_remote_process $ATTACKER_IP "legit_client.py" "Legitimate Client"
 
+echo "[*] Kích hoạt WRK Throughput Monitor (Attacker VM) trong netns legit..."
+ssh $USER@$ATTACKER_IP "nohup sudo ip netns exec legit bash $REMOTE_DIR/attacker/wrk_monitor.sh $SCENARIO >/tmp/wrk_mon.log 2>&1 &"
+check_remote_process $ATTACKER_IP "wrk_monitor.sh" "WRK Monitor"
+
 log_event "baseline_start" "Bắt đầu đo Baseline 30s"
 sleep 30
 
@@ -97,7 +101,8 @@ sleep 15
 
 # 3. Dừng tấn công
 log_event "attack_stop" "Gửi lệnh dừng tấn công"
-ssh $USER@$ATTACKER_IP "pkill hping3; pkill -f hping3_cidr.sh; pkill python; pkill slowloris"
+# sudo pkill vì hping3 chạy bằng root (operation not permitted nếu không có sudo)
+ssh $USER@$ATTACKER_IP "sudo pkill -9 hping3 2>/dev/null; sudo pkill -9 -f hping3_cidr.sh 2>/dev/null" || true
 
 # 4. Recovery
 log_event "recovery_start" "Bắt đầu đo Recovery 30s"
@@ -107,12 +112,13 @@ log_event "recovery_complete" "Hoàn tất Benchmark"
 # 5. Dọn dẹp & Kéo file về
 echo "[*] Dọn dẹp tiến trình..."
 kill $FW_PID
-ssh $USER@$VICTIM_IP "pkill -f monitor_apache.sh"
-ssh $USER@$ATTACKER_IP "pkill -f legit_client.py"
+ssh $USER@$VICTIM_IP "sudo pkill -f monitor_apache.sh 2>/dev/null" || true
+ssh $USER@$ATTACKER_IP "sudo pkill -f legit_client.py 2>/dev/null; sudo pkill -f wrk_monitor.sh 2>/dev/null; sudo pkill wrk 2>/dev/null" || true
 
 echo "[*] Đang thu thập CSV từ các VM về Firewall..."
 scp $USER@$VICTIM_IP:/tmp/apache_status_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || true
 scp $USER@$ATTACKER_IP:/tmp/legit_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || true
+scp $USER@$ATTACKER_IP:/tmp/wrk_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || true
 # Di chuyển firewall metrics CSV (collector ghi vào /tmp)
 mv /tmp/metrics_firewall_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || echo "    [!] Không tìm thấy metrics_firewall CSV — collector có thể bị crash sớm."
 
