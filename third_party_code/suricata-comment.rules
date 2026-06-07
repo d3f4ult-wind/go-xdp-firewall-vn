@@ -23,11 +23,11 @@
 # 20 connection trong 10 giây là ngưỡng đủ nhạy mà ít false positive.
 alert tcp any any -> $HOME_NET 80 (msg:"SLOWLORIS Excessive new TCP connections from single IP"; flags:S; flow:to_server; threshold: type threshold, track by_src, count 20, seconds 10; sid:9000001; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP;)
 
-# Rule 2: HTTP request payload cực nhỏ — Slowloris gửi từng dòng header một,
-# mỗi packet chỉ vài byte. dsize < 50 bắt các packet "nhỏ giọt" bất thường.
-# FIX v2: Dùng http.method sticky buffer thay vì content:"GET" trên raw TCP
-#         để tránh false positive khi "GET" xuất hiện trong payload không liên quan.
-alert http any any -> $HOME_NET 80 (msg:"SLOWLORIS Tiny HTTP payload - possible partial header drip"; flow:established,to_server; http.method; content:"GET"; dsize:<50; threshold: type threshold, track by_src, count 1000, seconds 30; sid:9000002; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP;)
+# Rule 2: Đếm số lượng HTTP GET liên tục.
+# Lưu ý: Phiên bản trước dùng dsize < 50 kết hợp http.method nhưng Suricata 
+# không cho phép mix layer 4 (dsize) với layer 7 buffer (http.method).
+# Do đó, dsize đã bị loại bỏ và rule này trở thành một GET Flood cơ bản.
+alert http any any -> $HOME_NET 80 (msg:"SLOWLORIS Tiny HTTP payload - possible partial header drip"; flow:established,to_server; http.method; content:"GET"; threshold: type threshold, track by_src, count 1000, seconds 30; sid:9000002; rev:2; classtype:attempted-dos; metadata:affected_product Web_Server, attack_target HTTP;)
 
 # Rule 3: Header "X-a:" là dấu vết đặc trưng của tool Slowloris gốc (perl script).
 # Tool mặc định gửi header giả "X-a: b" để duy trì connection.
