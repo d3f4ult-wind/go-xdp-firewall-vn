@@ -25,8 +25,16 @@ WRK_UA="Mozilla/5.0 (LegitClient Benchmark/1.0)"
 echo "timestamp_unix_ms,req_per_sec,avg_latency_ms,p99_latency_ms,errors" > "$OUT_FILE"
 echo "[*] WRK Monitor bắt đầu. Ghi ra: $OUT_FILE"
 
-# Tạo file Lua script để rate-limit wrk (delay 50ms = ~20 req/s mỗi connection, tổng ~40 req/s)
+# Tạo file Lua script để rate-limit wrk và build custom request
 cat << 'EOF' > /tmp/wrk_delay.lua
+function request()
+    wrk.headers["User-Agent"]      = "Mozilla/5.0 (LegitClient Benchmark/1.0)"
+    wrk.headers["Accept"]          = "text/html,application/json"
+    wrk.headers["Accept-Language"] = "en-US,en;q=0.9"
+    wrk.headers["Connection"]      = "keep-alive"
+    return wrk.format("GET", nil)
+end
+
 function delay()
    return 50
 end
@@ -37,7 +45,6 @@ while true; do
 
     # Chạy wrk và capture output
     WRK_OUT=$(wrk -t${WRK_THREADS} -c${WRK_CONNS} -d${WRK_DURATION}s \
-        -H "User-Agent: ${WRK_UA}" \
         -s /tmp/wrk_delay.lua \
         --latency "$TARGET" 2>/dev/null)
 

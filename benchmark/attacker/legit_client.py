@@ -11,8 +11,8 @@
 
 import sys
 import time
-import urllib.request
-import urllib.error
+import http.client
+import urllib.parse
 from datetime import datetime
 
 scenario = sys.argv[1] if len(sys.argv) > 1 else "default"
@@ -21,6 +21,13 @@ out_file = f"/tmp/legit_{scenario}_{timestamp}.csv"
 
 VICTIM_URL = "http://10.10.2.2/health.php"
 TIMEOUT_SEC = 3.0 # Yêu cầu < 3000ms
+
+parsed_url = urllib.parse.urlparse(VICTIM_URL)
+conn = http.client.HTTPConnection(parsed_url.netloc, timeout=TIMEOUT_SEC)
+headers = {
+    "User-Agent": "Mozilla/5.0 (LegitClient Benchmark/1.0)",
+    "Connection": "keep-alive"
+}
 
 with open(out_file, "w") as f:
     f.write("timestamp_unix_ms,response_time_ms,status_code,available\n")
@@ -36,15 +43,17 @@ while True:
     available = 0
     
     try:
-        req = urllib.request.Request(VICTIM_URL)
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as response:
-            status_code = response.getcode()
-            if status_code == 200:
-                available = 1
-    except urllib.error.HTTPError as e:
-        status_code = e.code
+        conn.request("GET", parsed_url.path, headers=headers)
+        response = conn.getresponse()
+        response.read() # Read body to allow connection reuse
+        status_code = response.status
+        if status_code == 200:
+            available = 1
     except Exception as e:
         status_code = -1 # Connection Refused, Timeout, vv.
+        # Re-establish connection on next try
+        conn.close()
+        conn = http.client.HTTPConnection(parsed_url.netloc, timeout=TIMEOUT_SEC)
         
     response_time_ms = int((time.time() - start_time) * 1000)
     

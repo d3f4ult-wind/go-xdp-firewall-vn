@@ -34,6 +34,7 @@ rule-files:
 # Suricata dùng af-packet (Linux native, hiệu năng tốt hơn pcap)
 af-packet:
   - interface: enp0s8
+    bpf-filter: "not host 10.10.1.3" 
     # threads: auto — để Suricata tự chọn số thread phù hợp với CPU
     cluster-id: 99
     cluster-type: cluster_flow
