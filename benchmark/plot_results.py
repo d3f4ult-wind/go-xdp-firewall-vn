@@ -39,6 +39,7 @@ def main():
         print("[!] Không tìm thấy legit_*.csv — bỏ qua biểu đồ Availability.")
     if wrk_files:
         df_wrk = pd.read_csv(wrk_files[0])
+        df_wrk = df_wrk.dropna()
         print(f"[*] WRK log: {wrk_files[0]}")
     else:
         print("[!] Không tìm thấy wrk_*.csv — bỏ qua biểu đồ Throughput.")

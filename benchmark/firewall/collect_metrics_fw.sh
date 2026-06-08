@@ -145,7 +145,7 @@ try:
         elif isinstance(k,list):
             try: k=int.from_bytes(bytes(k),'little')
             except: k=-1
-        if k in (3,4,5):
+        if k in (2,3,4,5):
             vals=e.get('values',[])
             total+=sum(int(v.get('value',0)) for v in vals if isinstance(v,dict))
     print(total)

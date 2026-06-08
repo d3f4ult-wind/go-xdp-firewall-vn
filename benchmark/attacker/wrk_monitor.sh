@@ -78,7 +78,7 @@ else: print(0)
 " 2>/dev/null || echo 0)
 
         # Parse errors (Socket errors)
-        ERRORS=$(echo "$WRK_OUT" | grep -c "Socket errors" || echo 0)
+        ERRORS=$(echo "$WRK_OUT" | grep -c "Socket errors" || true)
 
         echo "$TS_MS,$REQ_PER_SEC,$AVG_LAT_MS,$P99_MS,$ERRORS" >> "$OUT_FILE"
         echo "  [wrk] $(date +%H:%M:%S) | Req/s=$REQ_PER_SEC | P99=${P99_MS}ms"
