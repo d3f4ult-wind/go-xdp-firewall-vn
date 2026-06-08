@@ -143,7 +143,9 @@ try:
             try: k=int(k,16)
             except: k=-1
         elif isinstance(k,list):
-            try: k=int.from_bytes(bytes(k),'little')
+            try:
+                b = bytes(int(x, 16) if isinstance(x, str) else x for x in k)
+                k = int.from_bytes(b, 'little')
             except: k=-1
         if k in (2,3,4,5):
             vals=e.get('values',[])
