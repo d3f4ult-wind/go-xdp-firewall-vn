@@ -28,6 +28,8 @@ def main():
 
     print(f"[*] Đang đọc dữ liệu từ: {res_dir}")
     df_fw = pd.read_csv(fw_files[0])
+    # Bỏ dòng đầu tiên vì script thu thập bị lỗi cộng dồn (cumulative) ở giây 0
+    df_fw = df_fw.iloc[1:].reset_index(drop=True)
     df_evt = pd.read_csv(evt_file)
 
     df_vic = None
