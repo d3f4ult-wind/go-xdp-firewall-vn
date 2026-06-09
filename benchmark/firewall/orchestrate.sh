@@ -102,7 +102,7 @@ sleep 15
 # 3. Dừng tấn công
 log_event "attack_stop" "Gửi lệnh dừng tấn công"
 # sudo pkill vì hping3 chạy bằng root (operation not permitted nếu không có sudo)
-ssh $USER@$ATTACKER_IP "sudo pkill -9 hping3 2>/dev/null; sudo pkill -9 -f hping3_cidr.sh 2>/dev/null" || true
+ssh $USER@$ATTACKER_IP "sudo pkill -9 hping3 2>/dev/null; sudo pkill -9 -f hping3_cidr.sh 2>/dev/null; sudo pkill -9 -f slowloris 2>/dev/null" || true
 
 # 4. Recovery
 log_event "recovery_start" "Bắt đầu đo Recovery 30s"
