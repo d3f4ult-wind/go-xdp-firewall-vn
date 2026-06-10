@@ -7,8 +7,8 @@
 
 echo "[*] [ATTACKER] Đang chuẩn bị tấn công Slowloris (L7)..."
 
-# Xóa các tiến trình slowloris cũ nếu có
-sudo pkill -9 -f slowloris 2>/dev/null || true
+# Xóa các tiến trình slowloris cũ nếu có (không dùng cờ -f để tránh script tự sát vì tên file có chữ slowloris)
+sudo pkill -9 slowloris 2>/dev/null || true
 
 # Gọi script slowloris.sh chạy ở chế độ nền
 bash $(dirname "$0")/slowloris.sh > /dev/null 2>&1 &
