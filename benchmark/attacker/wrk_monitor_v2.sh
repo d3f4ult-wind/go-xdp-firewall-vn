@@ -67,7 +67,7 @@ while true; do
         REQ_PER_SEC=${REQ_PER_SEC:-0}
 
         # 2. Parse Latency
-        AVG_LAT_RAW=$(echo "$WRK_OUT" | grep -E "^\s+Latency" | awk '{print $2}')
+        AVG_LAT_RAW=$(echo "$WRK_OUT" | grep -E "^\s+Latency" | head -n 1 | awk '{print $2}')
         AVG_LAT=$(parse_latency "$AVG_LAT_RAW")
         
         P99_LAT_RAW=$(echo "$WRK_OUT" | grep "99%" | awk '{print $2}')
