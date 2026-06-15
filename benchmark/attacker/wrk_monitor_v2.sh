@@ -36,14 +36,18 @@ EOF
 
 # Hàm xử lý parse thời gian (s/ms/us)
 parse_latency() {
-    local raw=$1
-    if [[ "$raw" == *"ms"* ]]; then
-        echo "${raw%ms}"
-    elif [[ "$raw" == *"us"* ]]; then
-        val="${raw%us}"
+    local raw="$1"
+    # Extract chỉ phần số+unit, bỏ mọi text thừa (vd: "Distribution")
+    local cleaned
+    cleaned=$(echo "$raw" | grep -oE '[0-9]+(\.[0-9]+)?(ms|us|s)' | head -n1)
+    
+    if [[ "$cleaned" == *"ms"* ]]; then
+        echo "${cleaned%ms}"
+    elif [[ "$cleaned" == *"us"* ]]; then
+        val="${cleaned%us}"
         echo "$val" | awk '{printf "%.2f", $1/1000}'
-    elif [[ "$raw" == *"s"* ]]; then
-        val="${raw%s}"
+    elif [[ "$cleaned" == *"s"* ]]; then
+        val="${cleaned%s}"
         echo "$val" | awk '{printf "%.2f", $1*1000}'
     else
         echo "0"
@@ -70,7 +74,8 @@ while true; do
         AVG_LAT_RAW=$(echo "$WRK_OUT" | grep -E "^\s+Latency" | head -n 1 | awk '{print $2}')
         AVG_LAT=$(parse_latency "$AVG_LAT_RAW")
         
-        P99_LAT_RAW=$(echo "$WRK_OUT" | grep "99%" | awk '{print $2}')
+        #P99_LAT_RAW=$(echo "$WRK_OUT" | grep "99%" | awk '{print $2}')
+        P99_LAT_RAW=$(echo "$WRK_OUT" | grep -E "^\s+99%" | awk '{print $2}' | tr -d '[:space:]')
         P99_LAT=$(parse_latency "$P99_LAT_RAW")
 
         # 3. Parse Total Requests (Thành công)
