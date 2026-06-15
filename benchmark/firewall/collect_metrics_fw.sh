@@ -138,7 +138,8 @@ except Exception:
 import sys,json
 try:
     d=json.loads(sys.stdin.read() or '[]')
-    total=0
+    total_pkts=0
+    tier2_pass=0
     for e in d:
         if not isinstance(e,dict): continue
         k=e.get('key','')
@@ -150,10 +151,16 @@ try:
                 b = bytes(int(x, 16) if isinstance(x, str) else x for x in k)
                 k = int.from_bytes(b, 'little')
             except: k=-1
-        if k in (2,3,4,5):
+            
+        if k == 0:
             vals=e.get('values',[])
-            total+=sum(int(v.get('value',0)) for v in vals if isinstance(v,dict))
-    print(total)
+            total_pkts+=sum(int(v.get('value',0)) for v in vals if isinstance(v,dict))
+        elif k == 6:
+            vals=e.get('values',[])
+            tier2_pass+=sum(int(v.get('value',0)) for v in vals if isinstance(v,dict))
+            
+    drop = total_pkts - tier2_pass
+    print(drop if drop > 0 else 0)
 except Exception:
     print(0)
 " 2>/dev/null || true)

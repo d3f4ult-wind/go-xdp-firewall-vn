@@ -60,6 +60,12 @@ echo "[*] Kiểm tra kết nối SSH tới Attacker và Victim..."
 ssh -o BatchMode=yes -o ConnectTimeout=2 $USER@$ATTACKER_IP "echo 'SSH Attacker OK'" || { echo "[ERROR] Không thể SSH Attacker"; exit 1; }
 ssh -o BatchMode=yes -o ConnectTimeout=2 $USER@$VICTIM_IP "echo 'SSH Victim OK'" || { echo "[ERROR] Không thể SSH Victim"; exit 1; }
 
+# 0.5. Dọn dẹp file CSV/Log cũ trên /tmp
+echo "[*] Dọn dẹp file rác từ các kịch bản trước trên cả 3 VM..."
+ssh $USER@$ATTACKER_IP "rm -f /tmp/legit_*.csv /tmp/wrk_*.csv /tmp/*.log"
+ssh $USER@$VICTIM_IP "rm -f /tmp/apache_status_*.csv /tmp/*.log"
+rm -f /tmp/metrics_firewall_*.csv /tmp/collector_*.log
+
 # 1. Bật Metric Collector
 echo "[*] Kích hoạt Firewall Metric Collector..."
 COLLECTOR_LOG="/tmp/collector_${SCENARIO}.log"
