@@ -131,35 +131,25 @@ except Exception:
     if [ "$delta_xdp_run" -lt 0 ]; then delta_xdp_run=0; fi
     prev_xdp_run=$cur_xdp_run
     
-    # Đọc tổng số Drop từ Map mitigation_stats (PERCPU). Index 3,4,5 tương ứng Drop/Block.
+    # Đọc tổng số Drop từ Map mitigation_stat (PERCPU). Index 3,4,5 tương ứng Drop/Block.
     # Fix: bpftool PERCPU_ARRAY key có thể là int (3) hoặc hex string ("0x00000003")
     # Cần convert về int trước khi so sánh. Index 3=syn_dropped, 4=udp_dropped, 5=icmp_dropped
-    cur_xdp_drop=$(bpftool map dump name mitigation_stats -j 2>/dev/null | python3 -c "
+    cur_xdp_drop=$(bpftool map dump name mitigation_stat -j 2>/dev/null | python3 -c "
 import sys,json
 try:
     d=json.loads(sys.stdin.read() or '[]')
-    total_pkts=0
-    tier2_pass=0
+    total=0
+    passed=0
     for e in d:
-        if not isinstance(e,dict): continue
-        k=e.get('key','')
-        if isinstance(k,str):
-            try: k=int(k,16)
-            except: k=-1
-        elif isinstance(k,list):
-            try:
-                b = bytes(int(x, 16) if isinstance(x, str) else x for x in k)
-                k = int.from_bytes(b, 'little')
-            except: k=-1
-            
-        if k == 0:
-            vals=e.get('values',[])
-            total_pkts+=sum(int(v.get('value',0)) for v in vals if isinstance(v,dict))
-        elif k == 6:
-            vals=e.get('values',[])
-            tier2_pass+=sum(int(v.get('value',0)) for v in vals if isinstance(v,dict))
-            
-    drop = total_pkts - tier2_pass
+        fmt=e.get('formatted',{})
+        k=fmt.get('key',-1)
+        vals=fmt.get('values',[])
+        s=sum(v.get('value',0) for v in vals)
+        if k==0:
+            total+=s
+        elif k==6:
+            passed+=s
+    drop = total - passed
     print(drop if drop > 0 else 0)
 except Exception:
     print(0)
