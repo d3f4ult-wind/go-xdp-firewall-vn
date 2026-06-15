@@ -20,7 +20,7 @@ EXT_IFACE="enp0s8"
 # Kích hoạt eBPF stats trên kernel để hiển thị run_cnt
 sysctl -w kernel.bpf_stats_enabled=1 >/dev/null 2>&1 || true
 
-echo "timestamp_unix_ms,cpu_all,nic_ext_irq_per_sec,softirq_net_rx_per_sec,softirq_net_tx_per_sec,mem_used_mb,ext_rx_pps,ext_rx_bps,conntrack_count,conntrack_syn_sent,conntrack_time_wait,xdp_run_pps,xdp_drop_pps,iptables_drop_per_sec" > "$OUT_FILE"
+echo "timestamp_unix_ms,cpu_all,nic_ext_irq_per_sec,softirq_net_rx_per_sec,softirq_net_tx_per_sec,mem_used_mb,ext_rx_pps,ext_rx_bps,conntrack_count,conntrack_syn_sent,conntrack_time_wait,xdp_run_pps,xdp_drop_pps,iptables_drop_pps,iptables_drop_bps,iptables_accept_pps,iptables_accept_bps" > "$OUT_FILE"
 
 # Biến lưu trữ vòng lặp trước để tính delta
 prev_irq=0
@@ -30,7 +30,10 @@ prev_ext_pkts=0
 prev_ext_bytes=0
 prev_xdp_run=0
 prev_xdp_drop=0
-prev_iptables_drop=0
+prev_ipt_drop_pkts=0
+prev_ipt_drop_bytes=0
+prev_ipt_accept_pkts=0
+prev_ipt_accept_bytes=0
 
 # Đọc CPU ban đầu từ /proc/stat
 cpu_stats=($(grep '^cpu ' /proc/stat))
@@ -160,16 +163,33 @@ except Exception:
     if [ "$delta_xdp_drop" -lt 0 ]; then delta_xdp_drop=0; fi
     prev_xdp_drop=$cur_xdp_drop
     
-    # 7. Iptables
-    cur_ipt_drop=$(iptables -nvL | grep "DROP" | awk '{sum+=$1} END {print sum+0}' || true)
-    if [ -z "$cur_ipt_drop" ]; then cur_ipt_drop=0; fi
-    delta_ipt_drop=$((cur_ipt_drop - prev_iptables_drop))
-    # Chống âm khi flush rules
-    if [ "$delta_ipt_drop" -lt 0 ]; then delta_ipt_drop=0; fi
-    prev_iptables_drop=$cur_ipt_drop
+    # 7. Iptables (Quét TOÀN BỘ các chain, nhưng dùng -x để lấy số chính xác
+    # và CHỈ cộng dồn nếu Cột 3 (Target) CHÍNH XÁC là DROP hoặc ACCEPT.
+    # Điều này loại bỏ hoàn toàn việc đếm nhầm các rule LOG có chứa chữ ACCEPT/DROP)
+    ipt_stats=$(iptables -nvLx || true)
+    cur_ipt_drop_pkts=$(echo "$ipt_stats" | awk '$3 == "DROP" {sum+=$1} END {print sum+0}')
+    cur_ipt_drop_bytes=$(echo "$ipt_stats" | awk '$3 == "DROP" {sum+=$2} END {print sum+0}')
+    cur_ipt_accept_pkts=$(echo "$ipt_stats" | awk '$3 == "ACCEPT" {sum+=$1} END {print sum+0}')
+    cur_ipt_accept_bytes=$(echo "$ipt_stats" | awk '$3 == "ACCEPT" {sum+=$2} END {print sum+0}')
+    
+    delta_ipt_drop_pkts=$((cur_ipt_drop_pkts - prev_ipt_drop_pkts))
+    if [ "$delta_ipt_drop_pkts" -lt 0 ]; then delta_ipt_drop_pkts=0; fi
+    prev_ipt_drop_pkts=$cur_ipt_drop_pkts
+
+    delta_ipt_drop_bytes=$((cur_ipt_drop_bytes - prev_ipt_drop_bytes))
+    if [ "$delta_ipt_drop_bytes" -lt 0 ]; then delta_ipt_drop_bytes=0; fi
+    prev_ipt_drop_bytes=$cur_ipt_drop_bytes
+
+    delta_ipt_accept_pkts=$((cur_ipt_accept_pkts - prev_ipt_accept_pkts))
+    if [ "$delta_ipt_accept_pkts" -lt 0 ]; then delta_ipt_accept_pkts=0; fi
+    prev_ipt_accept_pkts=$cur_ipt_accept_pkts
+
+    delta_ipt_accept_bytes=$((cur_ipt_accept_bytes - prev_ipt_accept_bytes))
+    if [ "$delta_ipt_accept_bytes" -lt 0 ]; then delta_ipt_accept_bytes=0; fi
+    prev_ipt_accept_bytes=$cur_ipt_accept_bytes
     
     # Xuất ra CSV
-    echo "$TS_MS,$cpu_usage,$delta_irq,$delta_soft_rx,$delta_soft_tx,$mem_used_mb,$delta_ext_pps,$delta_ext_bps,$ct_count,$ct_syn,$ct_tw,$delta_xdp_run,$delta_xdp_drop,$delta_ipt_drop" >> "$OUT_FILE"
+    echo "$TS_MS,$cpu_usage,$delta_irq,$delta_soft_rx,$delta_soft_tx,$mem_used_mb,$delta_ext_pps,$delta_ext_bps,$ct_count,$ct_syn,$ct_tw,$delta_xdp_run,$delta_xdp_drop,$delta_ipt_drop_pkts,$delta_ipt_drop_bytes,$delta_ipt_accept_pkts,$delta_ipt_accept_bytes" >> "$OUT_FILE"
     
     sleep 1
 done

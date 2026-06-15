@@ -7,7 +7,9 @@
 # =============================================================
 
 TARGET="http://10.10.2.2/"
-OUT_FILE=${1:-"/tmp/wrk_log.csv"}
+SCENARIO=${1:-default}
+TS=$(date +"%Y%m%d_%H%M%S")
+OUT_FILE="/tmp/wrk_${SCENARIO}_${TS}.csv"
 
 # --- CẤU HÌNH WRK V2 ---
 WRK_THREADS=4

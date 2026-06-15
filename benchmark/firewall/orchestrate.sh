@@ -81,8 +81,8 @@ ssh $USER@$ATTACKER_IP "nohup sudo ip netns exec legit python3 $REMOTE_DIR/attac
 check_remote_process $ATTACKER_IP "legit_client.py" "Legitimate Client"
 
 echo "[*] Kích hoạt WRK Throughput Monitor (Attacker VM) trong netns legit..."
-ssh $USER@$ATTACKER_IP "nohup sudo ip netns exec legit bash $REMOTE_DIR/attacker/wrk_monitor.sh $SCENARIO >/tmp/wrk_mon.log 2>&1 &"
-check_remote_process $ATTACKER_IP "wrk_monitor.sh" "WRK Monitor"
+ssh $USER@$ATTACKER_IP "nohup sudo ip netns exec legit bash $REMOTE_DIR/attacker/wrk_monitor_v2.sh $SCENARIO >/tmp/wrk_mon.log 2>&1 &"
+check_remote_process $ATTACKER_IP "wrk_monitor_v2.sh" "WRK Monitor"
 
 log_event "baseline_start" "Bắt đầu đo Baseline 30s"
 sleep 30
@@ -113,7 +113,7 @@ log_event "recovery_complete" "Hoàn tất Benchmark"
 echo "[*] Dọn dẹp tiến trình..."
 kill $FW_PID
 ssh $USER@$VICTIM_IP "sudo pkill -f monitor_apache.sh 2>/dev/null" || true
-ssh $USER@$ATTACKER_IP "sudo pkill -f legit_client.py 2>/dev/null; sudo pkill -f wrk_monitor.sh 2>/dev/null; sudo pkill wrk 2>/dev/null" || true
+ssh $USER@$ATTACKER_IP "sudo pkill -f legit_client.py 2>/dev/null; sudo pkill -f wrk_monitor_v2.sh 2>/dev/null; sudo pkill wrk 2>/dev/null" || true
 
 echo "[*] Đang thu thập CSV từ các VM về Firewall..."
 scp $USER@$VICTIM_IP:/tmp/apache_status_${SCENARIO}_*.csv "$OUT_DIR/" 2>/dev/null || true
