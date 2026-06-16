@@ -11,7 +11,7 @@
 # =============================================================
 
 SCENARIO="sc2_random"
-ATTACK_SCRIPT="attack_sc2_random.sh"
+ATTACK_SCRIPT="attack_sc2_random_v2.sh"
 FW_API="http://localhost:8080"
 # IP legit client trong netns "legit" — cần bypass Tier 1
 LEGIT_IP="10.10.1.3"
