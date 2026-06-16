@@ -163,7 +163,7 @@ except Exception:
     # 7. Iptables (Quét TOÀN BỘ các chain, nhưng dùng -x để lấy số chính xác
     # và CHỈ cộng dồn nếu Cột 3 (Target) CHÍNH XÁC là DROP hoặc ACCEPT.
     # Điều này loại bỏ hoàn toàn việc đếm nhầm các rule LOG có chứa chữ ACCEPT/DROP)
-    ipt_stats=$(iptables -nvLx || true)
+    ipt_stats=$(iptables -L -n -v -x 2>/dev/null || true) # Mỗi choice phải dùng 1 -
     cur_ipt_drop_pkts=$(echo "$ipt_stats" | awk '$3 == "DROP" {sum+=$1} END {print sum+0}')
     cur_ipt_drop_bytes=$(echo "$ipt_stats" | awk '$3 == "DROP" {sum+=$2} END {print sum+0}')
     cur_ipt_accept_pkts=$(echo "$ipt_stats" | awk '$3 == "ACCEPT" {sum+=$1} END {print sum+0}')
