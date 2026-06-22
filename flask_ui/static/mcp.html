@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MCP Chat AI - XDP Firewall</title>
+<style>
+body {
+  font-family: monospace;
+  background: #0f172a;
+  color: #e5e7eb;
+  margin: 20px;
+}
+
+h1 { color: #38bdf8; }
+
+.panel {
+  border: 1px solid #334155;
+  padding: 12px;
+  margin-bottom: 20px;
+  border-radius: 6px;
+  background: #020617;
+}
+
+button {
+  background: #2563eb;
+  border: none;
+  color: white;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button:hover { background: #1d4ed8; }
+
+input[type="text"], input[type="password"] {
+  background: #1e293b;
+  color: #e5e7eb;
+  border: 1px solid #334155;
+  padding: 8px;
+  border-radius: 4px;
+  width: calc(100% - 18px);
+  margin-bottom: 10px;
+}
+
+#chat-box {
+  height: 400px;
+  overflow-y: auto;
+  border: 1px solid #334155;
+  padding: 10px;
+  background: #0f172a;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg {
+  padding: 10px;
+  border-radius: 6px;
+  max-width: 80%;
+  word-wrap: break-word;
+}
+
+.msg.user {
+  background: #1e40af;
+  align-self: flex-end;
+  color: white;
+}
+
+.msg.ai {
+  background: #334155;
+  align-self: flex-start;
+  color: #e2e8f0;
+}
+
+.msg.system {
+  background: #064e3b;
+  align-self: center;
+  color: #a7f3d0;
+  font-size: 0.9em;
+}
+
+.loading {
+  font-style: italic;
+  color: #94a3b8;
+}
+</style>
+</head>
+<body>
+
+<h1>🧠 XDP AI Assistant (MCP)</h1>
+
+<div style="margin-bottom: 20px; padding: 10px; background: #1e293b; border-radius: 6px; border: 1px solid #334155;">
+  <a href="/" style="color: #94a3b8; text-decoration: none; margin-right: 15px;">📊 Dashboard</a>
+  <a href="/ratelimit" style="color: #94a3b8; text-decoration: none; margin-right: 15px;">🛡️ Rate Limit</a>
+  <a href="/tier1" style="color: #94a3b8; text-decoration: none; margin-right: 15px;">⚡ Tier 1</a>
+  <a href="/mcp" style="color: #38bdf8; text-decoration: none; font-weight: bold;">🧠 AI Assistant</a>
+</div>
+
+<div class="panel">
+  <p>💡 <b>Hướng dẫn:</b> Công cụ này sử dụng Gemini AI để điều khiển Firewall thay bạn. Hãy nhập API Key của Google Gemini vào ô bên dưới. (API Key chỉ lưu trên trình duyệt của bạn).</p>
+  <p>Ngoài ra, bạn cũng có thể kết nối file <code>mcp/mcp_server.py</code> với Claude Desktop để dùng chuẩn MCP chính thức.</p>
+  <input type="password" id="apiKey" placeholder="Nhập Google Gemini API Key (Bắt đầu bằng AIza...)">
+</div>
+
+<div class="panel">
+  <div id="chat-box">
+    <div class="msg system">Chào mừng bạn! Hệ thống đã sẵn sàng lắng nghe. Ví dụ: "Kiểm tra log xem có ai đang tấn công không" hoặc "Chặn IP 10.0.0.5".</div>
+  </div>
+  <input type="text" id="prompt" placeholder="Ra lệnh cho AI..." onkeypress="if(event.key === 'Enter') sendPrompt()">
+  <button onclick="sendPrompt()">Gửi Lệnh (Send)</button>
+</div>
+
+<script>
+let chatHistory = [];
+
+const tools = [
+  {
+    name: "block_ip",
+    description: "Chặn một địa chỉ IP bằng iptables/xdp rule.",
+    parameters: {
+      type: "object",
+      properties: {
+        ip: { type: "string", description: "IP cần chặn" },
+        reason: { type: "string", description: "Lý do chặn" }
+      },
+      required: ["ip"]
+    }
+  },
+  {
+    name: "unblock_ip",
+    description: "Bỏ chặn một địa chỉ IP.",
+    parameters: {
+      type: "object",
+      properties: { ip: { type: "string" } },
+      required: ["ip"]
+    }
+  },
+  {
+    name: "get_tier1_status",
+    description: "Lấy trạng thái hệ thống Tier 1 (chống DoS rand-src): Level, số gói tin drop.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "set_tier1_level",
+    description: "Cập nhật mức độ phòng thủ Tier 1 và tỷ lệ rớt.",
+    parameters: {
+      type: "object",
+      properties: {
+        level: { type: "integer", description: "Level (0-3)" },
+        syn_drop: { type: "integer", description: "Tỷ lệ drop SYN (0-100)" },
+        udp_drop: { type: "integer", description: "Tỷ lệ drop UDP (0-100)" },
+        icmp_drop: { type: "integer", description: "Tỷ lệ drop ICMP (0-100)" }
+      },
+      required: ["level", "syn_drop", "udp_drop", "icmp_drop"]
+    }
+  },
+  {
+    name: "check_firewall_health",
+    description: "Kiểm tra trạng thái chung của firewall (CPU, RAM, XDP state).",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "list_active_rules",
+    description: "Lấy danh sách các IP đang bị chặn.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "add_whitelist",
+    description: "Thêm một IP vào Whitelist (Tier 1 Trusted Map).",
+    parameters: {
+      type: "object",
+      properties: { ip: { type: "string", description: "IP cần thêm" } },
+      required: ["ip"]
+    }
+  },
+  {
+    name: "remove_whitelist",
+    description: "Xóa một IP khỏi Whitelist.",
+    parameters: {
+      type: "object",
+      properties: { ip: { type: "string", description: "IP cần xóa" } },
+      required: ["ip"]
+    }
+  },
+  {
+    name: "set_rate_limit",
+    description: "Cài đặt giới hạn rate-limit (Tier 2).",
+    parameters: {
+      type: "object",
+      properties: {
+        pps: { type: "integer", description: "Số gói tin trên giây (vd: 1000)" },
+        window_ms: { type: "integer", description: "Khung thời gian ms (vd: 1000)" }
+      },
+      required: ["pps", "window_ms"]
+    }
+  },
+  {
+    name: "list_autoblocked_ips",
+    description: "Liệt kê danh sách các IP đang bị block tự động.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "unban_autoblock_ip",
+    description: "Xóa IP khỏi danh sách autoblock (bỏ ban sớm).",
+    parameters: {
+      type: "object",
+      properties: { ip: { type: "string", description: "IP cần xóa (không bao gồm subnet)" } },
+      required: ["ip"]
+    }
+  },
+  {
+    name: "toggle_watcher_automode",
+    description: "Bật/tắt chế độ tự động nâng mức phòng thủ của Tier 1 Watcher.",
+    parameters: {
+      type: "object",
+      properties: { enabled: { type: "boolean", description: "true để bật, false để tắt" } },
+      required: ["enabled"]
+    }
+  },
+  {
+    name: "run_iptables_block",
+    description: "Chặn IP ở tầng iptables song song với XDP (Yêu cầu quyền root).",
+    parameters: {
+      type: "object",
+      properties: { ip: { type: "string" } },
+      required: ["ip"]
+    }
+  },
+  {
+    name: "list_iptables_rules",
+    description: "Đọc danh sách các rule của Iptables.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "reload_suricata_rules",
+    description: "Gửi signal SIGUSR2 tới Suricata để reload rules mà không cần restart.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "get_suricata_stats",
+    description: "Đọc thống kê Suricata (alerts/giây).",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "read_suricata_logs",
+    description: "Đọc 50 cảnh báo gần nhất từ Suricata.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "read_iptables_logs",
+    description: "Đọc 50 dòng log iptables gần nhất.",
+    parameters: { type: "object", properties: {} }
+  },
+  {
+    name: "generate_security_report",
+    description: "Tạo báo cáo tổng hợp (health, tier1_stats, suricata logs, iptables logs).",
+    parameters: { type: "object", properties: {} }
+  }
+];
+
+function appendMsg(text, sender) {
+  const box = document.getElementById("chat-box");
+  const div = document.createElement("div");
+  div.className = `msg ${sender}`;
+  div.innerText = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  return div;
+}
+
+async function executeTool(name, args) {
+  appendMsg(`🔧 Đang thực thi: ${name}(${JSON.stringify(args)})`, "system");
+  
+  try {
+    if (name === "block_ip") {
+      const res = await fetch("/rules", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ subnet: args.ip + "/32", proto: 0, port: 0, action: "DROP" })
+      });
+      return await res.text();
+    }
+    if (name === "unblock_ip") {
+      const res = await fetch("/rules", {
+        method: "DELETE",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ subnet: args.ip + "/32", proto: 0, port: 0 })
+      });
+      return await res.text();
+    }
+    if (name === "get_tier1_status") {
+      const res1 = await fetch("/api/tier1/stats");
+      const res2 = await fetch("/api/tier1/watcher");
+      const st1 = await res1.json();
+      const st2 = await res2.json();
+      return JSON.stringify({ stats: st1, watcher: st2 });
+    }
+    if (name === "set_tier1_level") {
+      const payload = {
+        level: args.level,
+        syn_drop: args.syn_drop,
+        udp_drop: args.udp_drop,
+        icmp_drop: args.icmp_drop,
+        geo_syn_drop: Math.floor(args.syn_drop / 5),
+        geo_udp_drop: Math.floor(args.udp_drop / 5),
+        geo_icmp_drop: Math.floor(args.icmp_drop / 5)
+      };
+      const res = await fetch("/api/tier1/mitigation", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      return await res.text();
+    }
+    if (name === "check_firewall_health") {
+      const res = await fetch("/health");
+      return await res.text();
+    }
+    if (name === "list_active_rules") {
+      const res = await fetch("/rules");
+      return await res.text();
+    }
+    if (name === "add_whitelist") {
+      const res = await fetch("/api/tier1/trusted", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ ip: args.ip })
+      });
+      return await res.text();
+    }
+    if (name === "remove_whitelist") {
+      const res = await fetch("/api/tier1/trusted", {
+        method: "DELETE",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ ip: args.ip })
+      });
+      return await res.text();
+    }
+    if (name === "set_rate_limit") {
+      const res = await fetch("/ratelimit/config", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ pps: args.pps, window_ms: args.window_ms })
+      });
+      return await res.text();
+    }
+    if (name === "list_autoblocked_ips") {
+      const res = await fetch("/autoblock/ips");
+      return await res.text();
+    }
+    if (name === "unban_autoblock_ip") {
+      const res = await fetch("/autoblock/ips", {
+        method: "DELETE",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ cidr: args.ip + "/32" })
+      });
+      return await res.text();
+    }
+    if (name === "toggle_watcher_automode") {
+      const res = await fetch("/api/tier1/watcher", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ auto_mode: args.enabled })
+      });
+      return await res.text();
+    }
+    if (name === "run_iptables_block") {
+      const res = await fetch("/api/system/run_iptables_block", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ ip: args.ip })
+      });
+      return await res.text();
+    }
+    if (name === "list_iptables_rules") {
+      const res = await fetch("/api/system/list_iptables_rules");
+      return await res.text();
+    }
+    if (name === "reload_suricata_rules") {
+      const res = await fetch("/api/system/reload_suricata_rules", { method: "POST" });
+      return await res.text();
+    }
+    if (name === "get_suricata_stats") {
+      const res = await fetch("/api/system/get_suricata_stats");
+      return await res.text();
+    }
+    if (name === "read_suricata_logs") {
+      const res = await fetch("/api/system/read_suricata_logs");
+      return await res.text();
+    }
+    if (name === "read_iptables_logs") {
+      const res = await fetch("/api/system/read_iptables_logs");
+      return await res.text();
+    }
+    if (name === "generate_security_report") {
+      const res1 = await fetch("/health");
+      const res2 = await fetch("/api/tier1/stats");
+      const res3 = await fetch("/api/system/read_iptables_logs");
+      const res4 = await fetch("/api/system/read_suricata_logs");
+      const health = await res1.json();
+      const tier1 = await res2.json();
+      const iptables = await res3.json();
+      const suricata = await res4.json();
+      return JSON.stringify({ health, tier1, iptables_log_sample: iptables.logs, suricata_log_sample: suricata.logs });
+    }
+    return "Unknown tool";
+  } catch (e) {
+    return "Error: " + e.message;
+  }
+}
+
+async function sendPrompt() {
+  const apiKey = document.getElementById("apiKey").value.trim();
+  if (!apiKey) {
+    alert("Vui lòng nhập API Key.");
+    return;
+  }
+  
+  const input = document.getElementById("prompt");
+  const text = input.value.trim();
+  if (!text) return;
+  
+  input.value = "";
+  appendMsg(text, "user");
+  
+  chatHistory.push({ role: "user", parts: [{ text: text }] });
+  
+  let loadingMsg = appendMsg("AI đang suy nghĩ...", "ai loading");
+  
+  try {
+    let aiResponse = await callGemini(apiKey);
+    
+    // Xử lý Tool Call nếu có
+    while (aiResponse.functionCall) {
+      const fn = aiResponse.functionCall;
+      const toolResult = await executeTool(fn.name, fn.args);
+      
+      chatHistory.push({ role: "model", parts: [{ functionCall: fn }] });
+      chatHistory.push({
+        role: "function",
+        parts: [{ functionResponse: { name: fn.name, response: { result: toolResult } } }]
+      });
+      
+      loadingMsg.innerText = "AI đang xử lý kết quả...";
+      aiResponse = await callGemini(apiKey);
+    }
+    
+    loadingMsg.className = "msg ai";
+    loadingMsg.innerText = aiResponse.text || "Đã xong.";
+    chatHistory.push({ role: "model", parts: [{ text: loadingMsg.innerText }] });
+    
+  } catch (e) {
+    loadingMsg.className = "msg system";
+    loadingMsg.innerText = "Lỗi kết nối API: " + e.message;
+  }
+}
+
+async function callGemini(apiKey) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  
+  const body = {
+    contents: chatHistory,
+    tools: [{ functionDeclarations: tools }],
+    systemInstruction: {
+      parts: [{ text: "Bạn là một AI quản lý tường lửa (Firewall XDP). Bạn có thể phân tích vấn đề mạng, chặn IP, điều chỉnh mức độ phòng thủ. Khi người dùng ra lệnh, hãy giải thích ngắn gọn rồi sử dụng tool thích hợp." }]
+    }
+  };
+  
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)
+  });
+  
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  
+  const part = data.candidates[0].content.parts[0];
+  return {
+    text: part.text,
+    functionCall: part.functionCall
+  };
+}
+</script>
+
+</body>
+</html>

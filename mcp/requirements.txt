@@ -1,0 +1,11 @@
+# ===========================================================
+# FILE: requirements.txt
+# MÔ TẢ: Danh sách thư viện Python cần thiết cho MCP Server.
+# CÁCH CÀI: Xem file setup_venv.sh để cài đúng cách.
+# ===========================================================
+
+# Framework MCP chính thức của Anthropic (hỗ trợ FastMCP)
+mcp[cli]>=1.0.0
+
+# Thư viện gọi HTTP tới Go Firewall API (localhost:8080)
+requests>=2.28.0

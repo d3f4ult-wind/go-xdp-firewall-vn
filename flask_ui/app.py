@@ -13,6 +13,8 @@ TẠI SAO CÓ LỚP NÀY: Giúp tách biệt logic hiển thị và logic điề
 
 from flask import Flask, request, jsonify, send_from_directory
 import requests
+import subprocess
+import os
 
 # Địa chỉ của Go Control Plane. 
 # CẠM BẪY: Nếu triển khai trên Docker, 127.0.0.1 sẽ trỏ về chính container Flask. 
@@ -291,6 +293,73 @@ def tier1_geo_country():
 def tier1_watcher():
     data, status = call_firewall_api(request.method, "/tier1/watcher", json=request.json if request.method == "POST" else None)
     return jsonify(data), status
+
+@app.route("/mcp")
+def mcp_page():
+    """Phục vụ file HTML cấu hình MCP AI Chat."""
+    return send_from_directory("static", "mcp.html")
+
+@app.route("/api/system/run_iptables_block", methods=["POST"])
+def api_run_iptables_block():
+    ip = request.json.get("ip")
+    if not ip: return jsonify({"error": "Thiếu IP"}), 400
+    try:
+        res = subprocess.run(["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"], capture_output=True, text=True)
+        if res.returncode == 0: return jsonify({"status": "ok", "msg": f"✅ Đã chặn {ip} ở tầng Iptables."})
+        return jsonify({"error": res.stderr}), 500
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/list_iptables_rules", methods=["GET"])
+def api_list_iptables_rules():
+    try:
+        res = subprocess.run(["iptables", "-L", "-n"], capture_output=True, text=True)
+        return jsonify({"rules": res.stdout})
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/reload_suricata_rules", methods=["POST"])
+def api_reload_suricata_rules():
+    try:
+        res = subprocess.run(["pkill", "-USR2", "suricata"], capture_output=True, text=True)
+        if res.returncode == 0: return jsonify({"status": "ok", "msg": "✅ Đã reload rules Suricata thành công."})
+        return jsonify({"error": res.stderr}), 500
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/get_suricata_stats", methods=["GET"])
+def api_get_suricata_stats():
+    log_path = "/var/log/suricata/stats.log"
+    if not os.path.exists(log_path): return jsonify({"stats": f"Không tìm thấy log tại {log_path}."})
+    try:
+        with open(log_path, 'r') as f: lines = f.readlines()[-20:]
+        return jsonify({"stats": "\n".join(lines)})
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/read_suricata_logs", methods=["GET"])
+def api_read_suricata_logs():
+    log_path = "/var/log/suricata/eve.json"
+    if not os.path.exists(log_path): return jsonify({"logs": f"Không tìm thấy log tại {log_path}."})
+    try:
+        with open(log_path, 'r') as f: lines = f.readlines()[-50:]
+        import json
+        alerts = []
+        for line in lines:
+            try:
+                data = json.loads(line)
+                if data.get('event_type') == 'alert':
+                    alerts.append(f"{data.get('timestamp')} - {data.get('src_ip')} -> {data.get('dest_ip')}: {data.get('alert', {}).get('signature')}")
+            except: pass
+        return jsonify({"logs": "\n".join(alerts) if alerts else "Không có cảnh báo tấn công."})
+    except Exception as e: return jsonify({"error": str(e)}), 500
+
+@app.route("/api/system/read_iptables_logs", methods=["GET"])
+def api_read_iptables_logs():
+    log_paths = ["/var/log/syslog", "/var/log/kern.log"]
+    log_path = next((p for p in log_paths if os.path.exists(p)), None)
+    if not log_path: return jsonify({"logs": "Không tìm thấy syslog/kern.log."})
+    try:
+        with open(log_path, 'r') as f: lines = f.readlines()[-200:]
+        fw_logs = [l.strip() for l in lines if "FW-" in l or "DROP" in l or "iptables" in l.lower()]
+        return jsonify({"logs": "\n".join(fw_logs[-50:]) if fw_logs else "Không có log iptables."})
+    except Exception as e: return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     print("[+] Firewall UI (Flask) starting...")
