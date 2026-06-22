@@ -437,7 +437,7 @@ async function sendPrompt() {
       const fn = aiResponse.functionCall;
       const toolResult = await executeTool(fn.name, fn.args);
       
-      chatHistory.push({ role: "model", parts: [{ functionCall: fn }] });
+      chatHistory.push(aiResponse.content);
       chatHistory.push({
         role: "function",
         parts: [{ functionResponse: { name: fn.name, response: { result: toolResult } } }]
@@ -449,7 +449,7 @@ async function sendPrompt() {
     
     loadingMsg.className = "msg ai";
     loadingMsg.innerText = aiResponse.text || "Đã xong.";
-    chatHistory.push({ role: "model", parts: [{ text: loadingMsg.innerText }] });
+    chatHistory.push(aiResponse.content);
     
   } catch (e) {
     loadingMsg.className = "msg system";
@@ -477,10 +477,19 @@ async function callGemini(apiKey) {
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
   
-  const part = data.candidates[0].content.parts[0];
+  const content = data.candidates[0].content;
+  let text = "";
+  let functionCall = null;
+  
+  for (const part of content.parts) {
+    if (part.text) text += part.text;
+    if (part.functionCall) functionCall = part.functionCall;
+  }
+  
   return {
-    text: part.text,
-    functionCall: part.functionCall
+    content: content,
+    text: text,
+    functionCall: functionCall
   };
 }
 </script>
