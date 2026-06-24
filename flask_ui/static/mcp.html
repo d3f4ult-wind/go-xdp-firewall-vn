@@ -118,23 +118,29 @@ let chatHistory = [];
 const tools = [
   {
     name: "block_ip",
-    description: "Chặn một địa chỉ IP bằng iptables/xdp rule.",
+    description: "Chặn một địa chỉ IP bằng iptables/xdp rule. Bắt buộc cung cấp giao thức và cổng cụ thể.",
     parameters: {
       type: "object",
       properties: {
         ip: { type: "string", description: "IP cần chặn" },
+        proto: { type: "integer", description: "Protocol (Bắt buộc: 1=ICMP, 6=TCP, 17=UDP. Không dùng 0)" },
+        port: { type: "integer", description: "Port (Bắt buộc với TCP/UDP, 0 cho ICMP)" },
         reason: { type: "string", description: "Lý do chặn" }
       },
-      required: ["ip"]
+      required: ["ip", "proto", "port"]
     }
   },
   {
     name: "unblock_ip",
-    description: "Bỏ chặn một địa chỉ IP.",
+    description: "Bỏ chặn một địa chỉ IP. Phải truyền đúng proto và port lúc chặn.",
     parameters: {
       type: "object",
-      properties: { ip: { type: "string" } },
-      required: ["ip"]
+      properties: { 
+        ip: { type: "string" },
+        proto: { type: "integer", description: "Protocol (Bắt buộc: 1=ICMP, 6=TCP, 17=UDP. Không dùng 0)" },
+        port: { type: "integer", description: "Port (Bắt buộc với TCP/UDP, 0 cho ICMP)" }
+      },
+      required: ["ip", "proto", "port"]
     }
   },
   {
@@ -245,13 +251,23 @@ const tools = [
   },
   {
     name: "read_suricata_logs",
-    description: "Đọc 50 cảnh báo gần nhất từ Suricata.",
-    parameters: { type: "object", properties: {} }
+    description: "Đọc cảnh báo gần nhất từ Suricata.",
+    parameters: { 
+      type: "object", 
+      properties: {
+        n: { type: "integer", description: "Số dòng log muốn đọc (vd: 50)" }
+      } 
+    }
   },
   {
     name: "read_iptables_logs",
-    description: "Đọc 50 dòng log iptables gần nhất.",
-    parameters: { type: "object", properties: {} }
+    description: "Đọc dòng log iptables gần nhất.",
+    parameters: { 
+      type: "object", 
+      properties: {
+        n: { type: "integer", description: "Số dòng log muốn đọc (vd: 50)" }
+      } 
+    }
   },
   {
     name: "generate_security_report",
@@ -278,7 +294,7 @@ async function executeTool(name, args) {
       const res = await fetch("/rules", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ subnet: args.ip + "/32", proto: 0, port: 0, action: "DROP" })
+        body: JSON.stringify({ subnet: args.ip + "/32", proto: args.proto, port: args.port, action: "DROP" })
       });
       return await res.text();
     }
@@ -286,7 +302,7 @@ async function executeTool(name, args) {
       const res = await fetch("/rules", {
         method: "DELETE",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ subnet: args.ip + "/32", proto: 0, port: 0 })
+        body: JSON.stringify({ subnet: args.ip + "/32", proto: args.proto, port: args.port })
       });
       return await res.text();
     }
@@ -387,12 +403,16 @@ async function executeTool(name, args) {
       return await res.text();
     }
     if (name === "read_suricata_logs") {
-      const res = await fetch("/api/system/read_suricata_logs");
-      return await res.text();
+      const n = args.n || 50;
+      const res = await fetch(`/api/system/read_suricata_logs?n=${n}`);
+      const data = await res.json();
+      return data.logs || JSON.stringify(data);
     }
     if (name === "read_iptables_logs") {
-      const res = await fetch("/api/system/read_iptables_logs");
-      return await res.text();
+      const n = args.n || 50;
+      const res = await fetch(`/api/system/read_iptables_logs?n=${n}`);
+      const data = await res.json();
+      return data.logs || JSON.stringify(data);
     }
     if (name === "generate_security_report") {
       const res1 = await fetch("/health");

@@ -15,6 +15,7 @@ from flask import Flask, request, jsonify, send_from_directory
 import requests
 import subprocess
 import os
+import ipaddress
 
 # Địa chỉ của Go Control Plane. 
 # CẠM BẪY: Nếu triển khai trên Docker, 127.0.0.1 sẽ trỏ về chính container Flask. 
@@ -304,6 +305,10 @@ def api_run_iptables_block():
     ip = request.json.get("ip")
     if not ip: return jsonify({"error": "Thiếu IP"}), 400
     try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return jsonify({"error": f"IP không hợp lệ: {ip}"}), 400
+    try:
         res = subprocess.run(["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"], capture_output=True, text=True)
         if res.returncode == 0: return jsonify({"status": "ok", "msg": f"✅ Đã chặn {ip} ở tầng Iptables."})
         return jsonify({"error": res.stderr}), 500
@@ -335,10 +340,11 @@ def api_get_suricata_stats():
 
 @app.route("/api/system/read_suricata_logs", methods=["GET"])
 def api_read_suricata_logs():
+    n = request.args.get("n", 50, type=int)
     log_path = "/var/log/suricata/eve.json"
     if not os.path.exists(log_path): return jsonify({"logs": f"Không tìm thấy log tại {log_path}."})
     try:
-        with open(log_path, 'r') as f: lines = f.readlines()[-50:]
+        with open(log_path, 'r') as f: lines = f.readlines()[-n:]
         import json
         alerts = []
         for line in lines:
@@ -352,13 +358,14 @@ def api_read_suricata_logs():
 
 @app.route("/api/system/read_iptables_logs", methods=["GET"])
 def api_read_iptables_logs():
+    n = request.args.get("n", 50, type=int)
     log_paths = ["/var/log/syslog", "/var/log/kern.log"]
     log_path = next((p for p in log_paths if os.path.exists(p)), None)
     if not log_path: return jsonify({"logs": "Không tìm thấy syslog/kern.log."})
     try:
-        with open(log_path, 'r') as f: lines = f.readlines()[-200:]
+        with open(log_path, 'r') as f: lines = f.readlines()[-n*4:]
         fw_logs = [l.strip() for l in lines if "FW-" in l or "DROP" in l or "iptables" in l.lower()]
-        return jsonify({"logs": "\n".join(fw_logs[-50:]) if fw_logs else "Không có log iptables."})
+        return jsonify({"logs": "\n".join(fw_logs[-n:]) if fw_logs else "Không có log iptables."})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
