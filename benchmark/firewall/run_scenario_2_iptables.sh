@@ -17,16 +17,10 @@ echo " CHUẨN BỊ KỊCH BẢN 2 (BASELINE): IPTABLES ONLY + KERNEL SYN COOKIE
 echo " Mô tả: Tắt XDP. Bật tcp_syncookies = 1. Chống Random Source SYN Flood."
 echo "=========================================================="
 
-# --- PRE-FLIGHT 1: Kiểm tra firewall API ---
-echo "[*] Kiểm tra Firewall API (localhost:8080)..."
-if ! curl -s --max-time 2 "$FW_API/health" > /dev/null 2>&1; then
-    echo "[!] LỖI NGHIÊM TRỌNG: Firewall API không phản hồi tại $FW_API"
-    exit 1
-fi
-
-# --- PRE-FLIGHT 2: TẮT XDP ENFORCEMENT ---
-echo "[*] Tắt XDP Enforcement (Unload eBPF)..."
-curl -s -X POST "$FW_API/enforcement" -H "Content-Type: application/json" -d '{"enabled": false}' > /dev/null
+# --- PRE-FLIGHT 1: TẮT XDP ENFORCEMENT ---
+echo "[*] Tắt XDP Enforcement (Unload eBPF) trên cổng enp0s8..."
+ip link set dev enp0s8 xdp off 2>/dev/null || true
+echo "    [+] XDP Enforcement = OFF."
 
 # --- PRE-FLIGHT 3: BẬT kernel SYN Cookie ---
 echo "[*] Bật kernel SYN Cookie (tcp_syncookies = 1)..."

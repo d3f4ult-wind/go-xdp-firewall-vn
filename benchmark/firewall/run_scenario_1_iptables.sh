@@ -16,20 +16,9 @@ echo " CHUẨN BỊ KỊCH BẢN 0 (BASELINE): IPTABLES ONLY"
 echo " Mô tả: Tắt XDP. Chỉ dùng Iptables chống SYN Flood."
 echo "=========================================================="
 
-# --- PRE-FLIGHT 1: Kiểm tra firewall API ---
-echo "[*] Kiểm tra Firewall API (localhost:8080)..."
-if ! curl -s --max-time 2 "$FW_API/health" > /dev/null 2>&1; then
-    echo "[!] LỖI NGHIÊM TRỌNG: Firewall API không phản hồi tại $FW_API"
-    echo "    Hãy đảm bảo đã khởi động go-xdp-firewall trước khi chạy benchmark."
-    exit 1
-fi
-echo "    [+] Firewall API OK."
-
-# --- PRE-FLIGHT 2: TẮT XDP ENFORCEMENT ---
-echo "[*] Tắt XDP Enforcement (Unload eBPF)..."
-curl -s -X POST "$FW_API/enforcement" \
-    -H "Content-Type: application/json" \
-    -d '{"enabled": false}' > /dev/null
+# --- PRE-FLIGHT 1: TẮT XDP ENFORCEMENT ---
+echo "[*] Tắt XDP Enforcement (Unload eBPF) trên cổng enp0s8..."
+ip link set dev enp0s8 xdp off 2>/dev/null || true
 echo "    [+] XDP Enforcement = OFF."
 
 # --- PRE-FLIGHT 3: Tắt kernel SYN Cookie (đảm bảo Baseline thuần túy) ---
