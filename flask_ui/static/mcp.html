@@ -448,6 +448,7 @@ async function sendPrompt() {
   chatHistory.push({ role: "user", parts: [{ text: text }] });
   
   let loadingMsg = appendMsg("AI đang suy nghĩ...", "ai loading");
+  const startTime = performance.now();
   
   try {
     let aiResponse = await callGemini(apiKey);
@@ -467,8 +468,9 @@ async function sendPrompt() {
       aiResponse = await callGemini(apiKey);
     }
     
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
     loadingMsg.className = "msg ai";
-    loadingMsg.innerText = aiResponse.text || "Đã xong.";
+    loadingMsg.innerText = (aiResponse.text || "Đã xong.") + "\n\n⏱️ Thời gian phản hồi: " + elapsed + " giây.";
     chatHistory.push(aiResponse.content);
     
   } catch (e) {
@@ -478,7 +480,7 @@ async function sendPrompt() {
 }
 
 async function callGemini(apiKey) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   
   const body = {
     contents: chatHistory,
