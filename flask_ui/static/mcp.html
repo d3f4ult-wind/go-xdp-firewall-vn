@@ -456,7 +456,22 @@ async function sendPrompt() {
     // Xử lý Tool Call nếu có
     while (aiResponse.functionCall) {
       const fn = aiResponse.functionCall;
-      const toolResult = await executeTool(fn.name, fn.args);
+      
+      let toolResult;
+      // Danh sách các lệnh nguy hiểm cần xác nhận
+      const sensitiveTools = ["block_ip", "unblock_ip", "set_tier1_level", "add_whitelist", "remove_whitelist", "set_rate_limit", "unban_autoblock_ip", "toggle_watcher_automode", "run_iptables_block", "reload_suricata_rules"];
+      
+      let isApproved = true;
+      if (sensitiveTools.includes(fn.name)) {
+        isApproved = confirm(`[QUẢN TRỊ VIÊN XÁC NHẬN]\nAI đang yêu cầu thực thi lệnh: ${fn.name}\nTham số: ${JSON.stringify(fn.args)}\n\nBạn có cho phép thực thi không?`);
+      }
+      
+      if (isApproved) {
+        toolResult = await executeTool(fn.name, fn.args);
+      } else {
+        toolResult = "Quản trị viên đã TỪ CHỐI thực thi lệnh này vì lý do an toàn.";
+      }
+      
       
       chatHistory.push(aiResponse.content);
       chatHistory.push({
