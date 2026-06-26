@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -157,20 +158,31 @@ func (w *WatcherEngine) evaluate(avgPps uint64, sumAlerts uint32, lastLevelChang
 	}
 
 	// 2. Logic Tăng Cấp (Escalate)
-	// ĐIỀU KIỆN BẮT BUỘC: PPS > pps_high_watermark
-	// HOẶC PPS > pps_high_watermark * 0.7 VÀ Alerts > alert_high_watermark (Chất xúc tác)
+	// Để tránh False Positive (VD: Flash Sale làm PPS cao nhưng Server vẫn xử lý tốt),
+	// chúng ta kiểm tra thêm chỉ số quá tải tại tường lửa (Conntrack Table):
+	conntrackCount := getConntrackCount()
+	
+	// Lấy ngưỡng từ cấu hình, default là 10000 nếu chưa set
+	ctWatermark := w.config.ConntrackHighWatermark
+	if ctWatermark <= 0 {
+		ctWatermark = 10000
+	}
+	firewallCongested := conntrackCount > ctWatermark // Tường lửa đang theo dõi quá nhiều kết nối
+
 	catalystThreshold := uint64(float64(w.config.PpsHighWatermark) * 0.7)
 	
 	shouldEscalate := false
-	if avgPps >= w.config.PpsHighWatermark {
+	if avgPps >= w.config.PpsHighWatermark && firewallCongested {
+		// BẮT BUỘC: PPS vượt đỉnh VÀ Tường lửa đang bị tràn bảng trạng thái
 		shouldEscalate = true
 	} else if avgPps >= catalystThreshold && sumAlerts >= uint32(w.config.AlertHighWatermark) {
+		// XÚC TÁC: PPS mấp mé đỉnh VÀ hệ thống Suricata/Iptables báo động liên tục
 		shouldEscalate = true
 	}
 
 	if shouldEscalate {
 		newLevel := currentLevel + 1
-		log.Printf("[Watcher] PHÁT HIỆN TẤN CÔNG! Nâng cấp độ: Level %d -> %d (PPS: %d, Alerts: %d)", currentLevel, newLevel, avgPps, sumAlerts)
+		log.Printf("[Watcher] PHÁT HIỆN TẤN CÔNG! Nâng cấp độ: Level %d -> %d (PPS: %d, Alerts: %d, CT: %d)", currentLevel, newLevel, avgPps, sumAlerts, conntrackCount)
 		w.applyWREDConfig(newLevel)
 		w.fw.CurrentLevel.Store(newLevel)
 		*lastLevelChangeTime = time.Now()
@@ -216,3 +228,14 @@ func (w *WatcherEngine) applyWREDConfig(level uint32) {
 		log.Printf("[Watcher] Lỗi khi cập nhật BPF Map: %v", err)
 	}
 }
+
+// Đọc số lượng kết nối đang được theo dõi (Conntrack table)
+func getConntrackCount() int {
+	data, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_count")
+	if err != nil {
+		return 0
+	}
+	count, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	return count
+}
+

@@ -41,3 +41,4 @@ watcher:
   pps_low_watermark: 1000     # Tín hiệu Hạ cấp: PPS < mức này thì giảm level
   alert_high_watermark: 10     # Tín hiệu Xúc Tác (Accelerator): Số lượng alert / sliding_window
   alert_low_watermark: 2       # Tín hiệu Xúc Tác: Số lượng alert / sliding_window
+  conntrack_high_watermark: 50000 # Tín hiệu Cứng: Kích thước bảng conntrack báo hiệu Tường lửa quá tải

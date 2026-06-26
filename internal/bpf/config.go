@@ -34,9 +34,10 @@ type WatcherConfig struct {
 	SlidingWindowSize  int    `yaml:"sliding_window_size"`
 	CooldownSeconds    int    `yaml:"cooldown_seconds"`
 	PpsHighWatermark   uint64 `yaml:"pps_high_watermark"`
-	PpsLowWatermark    uint64 `yaml:"pps_low_watermark"`
-	AlertHighWatermark int    `yaml:"alert_high_watermark"`
-	AlertLowWatermark  int    `yaml:"alert_low_watermark"`
+	PpsLowWatermark        uint64 `yaml:"pps_low_watermark"`
+	AlertHighWatermark     int    `yaml:"alert_high_watermark"`
+	AlertLowWatermark      int    `yaml:"alert_low_watermark"`
+	ConntrackHighWatermark int    `yaml:"conntrack_high_watermark"`
 }
 
 /**
