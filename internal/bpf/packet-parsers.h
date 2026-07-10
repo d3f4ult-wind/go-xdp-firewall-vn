@@ -144,6 +144,8 @@ static __always_inline int parse_icmp6hdr(struct hdr_cursor *nh,
  * BƯỚC 1: Lấy thông tin Port đích (Destination Port).
  * CẠM BẪY: Giá trị trả về `tcp->dest` vẫn đang ở Network Byte Order (Big-endian).
  * Để sử dụng trong logic so sánh bình thường, bạn phải dùng `bpf_ntohs()`.
+ * LƯU Ý: Hàm này chỉ kiểm tra header tối thiểu `sizeof(struct tcphdr)`.
+ * Nếu cần đọc TCP options/payload, phải kiểm tra bounds thêm theo `tcp->doff`.
  */
 static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
                                         void *data_end,

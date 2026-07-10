@@ -10,6 +10,17 @@ import (
 	"time"
 )
 
+/**
+ * =================================================================================
+ * FILE: tier1.go
+ * MÔ TẢ: Quản lý logic điều khiển Tier 1 (Mitigation & Whitelisting).
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Giao tiếp với các eBPF Map chuyên trách của Tier 1 (mitigation_map, trusted_map, geo_trust_map).
+ *   2. Cung cấp API để cập nhật mức độ phòng thủ (Level 0-3), tỷ lệ Drop, và đọc thống kê (Telemetry).
+ *   3. Cho phép thêm các IP cụ thể vào Whitelist động hoặc dải CIDR vào Geo Trust Map.
+ * =================================================================================
+ */
+
 // UpdateMitigationMap cập nhật trạng thái Mitigation Tier 1.
 func (fw *Firewall) UpdateMitigationMap(level, synDrop, udpDrop, icmpDrop, geoSynDrop, geoUdpDrop, geoIcmpDrop uint32) error {
 	fw.mu.Lock()
@@ -36,7 +47,12 @@ func (fw *Firewall) UpdateMitigationMap(level, synDrop, udpDrop, icmpDrop, geoSy
 	return nil
 }
 
-// ReadMitigationStats đọc telemetry counter từ xdp-filter.c
+/**
+ * # HÀM ReadMitigationStats
+ * Đọc số liệu thống kê (Telemetry counter) từ xdp-filter.c
+ * TẠI SAO PHẢI CỘNG DỒN: Do mitigationStats là PERCPU_ARRAY Map, mỗi nhân CPU sẽ lưu một biến đếm riêng
+ * để tránh lock nghẽn cổ chai. Ở User-space, ta phải duyệt qua slice perCPUValues và cộng tổng lại.
+ */
 func (fw *Firewall) ReadMitigationStats() (map[string]uint64, error) {
 	fw.mu.RLock()
 	defer fw.mu.RUnlock()
@@ -71,7 +87,11 @@ func (fw *Firewall) ReadMitigationStats() (map[string]uint64, error) {
 	return result, nil
 }
 
-// AddTrustedIP thêm một IP đơn lẻ vào Dynamic Whitelist.
+/**
+ * # HÀM AddTrustedIP
+ * Thêm một IP đơn lẻ vào Dynamic Whitelist (trusted_map).
+ * Các IP trong map này sẽ bỏ qua toàn bộ việc kiểm tra ngẫu nhiên (Probabilistic Drop) của Tier 1.
+ */
 func (fw *Firewall) AddTrustedIP(ipStr string) error {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
@@ -99,7 +119,31 @@ func (fw *Firewall) AddTrustedIP(ipStr string) error {
 	return nil
 }
 
-// AddGeoPrefix thêm một dải mạng (CIDR) vào Geo Trust Map (LPM Trie)
+/**
+ * # HÀM LookupTrustedIP
+ * Kiểm tra một IP (dạng uint32 Little Endian) có trong trusted_map không.
+ * Trả về nil nếu tìm thấy (IP đang trong whitelist), error nếu không tìm thấy.
+ * Dùng RLock (read-only) để không chặn các thao tác đọc đồng thời từ Watcher.
+ * TẠI SAO CẦN: Watcher gọi hàm này mỗi khi nhận alert từ log, để phân biệt:
+ *   - IP trong trusted_map → user hợp lệ đã được admin tin cậy → không autoblock.
+ *   - IP không trong trusted_map → nguồn lạ đang tấn công → đếm alert, có thể autoblock.
+ * ĐÂY LÀ CÂU TRẢ LỜI CHO CÂU HỎI THẦY: "Firewall trống thì nhận diện whitelist thế nào?"
+ * → Admin/MCP thêm IP hợp lệ vào trusted_map trước (qua POST /tier1/trusted hoặc MCP tool).
+ * → Sau đó Watcher tự động đối chiếu mỗi alert với danh sách này.
+ */
+func (fw *Firewall) LookupTrustedIP(ipUint32 uint32, ts *uint64) error {
+	fw.mu.RLock()
+	defer fw.mu.RUnlock()
+	return fw.trustedMap.Lookup(ipUint32, ts)
+}
+
+
+
+/**
+ * # HÀM AddGeoPrefix
+ * Thêm một dải mạng (CIDR) vào Geo Trust Map (LPM Trie).
+ * Gói tin thuộc các dải mạng này sẽ được áp dụng tỷ lệ drop thấp hơn so với mức mặc định của Level hiện hành.
+ */
 func (fw *Firewall) AddGeoPrefix(cidrStr string) error {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
@@ -129,7 +173,11 @@ func (fw *Firewall) AddGeoPrefix(cidrStr string) error {
 	return nil
 }
 
-// AddGeoCountry tự động nạp toàn bộ CIDR của một quốc gia từ file MaxMind CSV.
+/**
+ * # HÀM AddGeoCountry
+ * Tiện ích hỗ trợ tự động nạp toàn bộ CIDR của một quốc gia (ví dụ: "VN") từ CSDL MaxMind CSV.
+ * LƯU Ý: Phụ thuộc vào 2 file CSV trong thư mục internal/geolite/.
+ */
 func (fw *Firewall) AddGeoCountry(countryIso string) (int, error) {
 	countryIso = strings.ToUpper(countryIso)
 
@@ -199,7 +247,10 @@ func (fw *Firewall) AddGeoCountry(countryIso string) (int, error) {
 	return count, nil
 }
 
-// ListTrustedIPs liệt kê toàn bộ IP có trong trusted_map
+/**
+ * # HÀM ListTrustedIPs
+ * Trả về danh sách tất cả các IP đang nằm trong Whitelist (kèm theo timestamp lúc được thêm vào).
+ */
 func (fw *Firewall) ListTrustedIPs() ([]map[string]interface{}, error) {
 	fw.mu.RLock()
 	defer fw.mu.RUnlock()
@@ -226,7 +277,10 @@ func (fw *Firewall) ListTrustedIPs() ([]map[string]interface{}, error) {
 	return result, nil
 }
 
-// ListGeoPrefixes liệt kê toàn bộ CIDR có trong geo_trust_map
+/**
+ * # HÀM ListGeoPrefixes
+ * Liệt kê toàn bộ CIDR ưu tiên có trong geo_trust_map.
+ */
 func (fw *Firewall) ListGeoPrefixes() ([]map[string]interface{}, error) {
 	fw.mu.RLock()
 	defer fw.mu.RUnlock()
@@ -252,7 +306,10 @@ func (fw *Firewall) ListGeoPrefixes() ([]map[string]interface{}, error) {
 	return result, nil
 }
 
-// RemoveTrustedIP xóa một IP khỏi trusted_map
+/**
+ * # HÀM RemoveTrustedIP
+ * Xóa một IP khỏi danh sách Whitelist.
+ */
 func (fw *Firewall) RemoveTrustedIP(ipStr string) error {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
@@ -269,7 +326,10 @@ func (fw *Firewall) RemoveTrustedIP(ipStr string) error {
 	return nil
 }
 
-// RemoveGeoPrefix xóa một CIDR khỏi geo_trust_map
+/**
+ * # HÀM RemoveGeoPrefix
+ * Xóa một CIDR cụ thể khỏi Geo Trust Map.
+ */
 func (fw *Firewall) RemoveGeoPrefix(cidrStr string) error {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
@@ -295,7 +355,11 @@ func (fw *Firewall) RemoveGeoPrefix(cidrStr string) error {
 	return nil
 }
 
-// ClearGeoPrefixes xóa toàn bộ các CIDR có trong geo_trust_map
+/**
+ * # HÀM ClearGeoPrefixes
+ * Xóa bỏ toàn bộ các dải IP đã thêm vào Geo Trust Map.
+ * Hữu ích khi cần reset lại danh sách ưu tiên.
+ */
 func (fw *Firewall) ClearGeoPrefixes() error {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()

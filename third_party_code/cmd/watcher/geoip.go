@@ -1,3 +1,18 @@
+/**
+ * =================================================================================
+ * FILE: geoip.go
+ * MÔ TẢ: Trích xuất các dải Subnet của một quốc gia và đẩy vào cấu trúc chặn.
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Quét file vị trí (Locations CSV) để ánh xạ mã quốc gia (như "VN", "CN") 
+ *      thành ID (ví dụ: 1814991). Lưu ID này vào RAM.
+ *   2. Khi có yêu cầu khóa một quốc gia, mở file Blocks CSV (dung lượng lớn).
+ *   3. Duyệt từng dòng, nếu ID khớp -> Đẩy dải CIDR (Subnet) vào BPFManager.
+ * TẠI SAO PHẢI LÀM VẬY:
+ *   File Blocks chứa hàng trăm ngàn dải IP, chiếm rất nhiều RAM nếu load toàn bộ.
+ *   Việc quét "On-demand" trên đĩa (Disk) chỉ mất vài giây nhưng tiết kiệm hàng chục MB RAM.
+ * =================================================================================
+ */
+
 package main
 
 import (
@@ -36,6 +51,10 @@ func NewGeoIPMonitor(bpfManager *BPFManager, blocksFile, locsFile string) *GeoIP
 	return g
 }
 
+/**
+ * # HÀM loadLocations
+ * Khởi tạo một Map nhỏ trong RAM để tra cứu nhanh từ "VN" -> "1562822".
+ */
 // loadLocations đọc file locsFile (rất nhỏ) vào RAM một lần khi khởi động.
 func (g *GeoIPMonitor) loadLocations() {
 	locFile, err := os.Open(g.locsFile)
@@ -73,6 +92,11 @@ func (g *GeoIPMonitor) Start() {
 	// go g.BlockCountry("CN") 
 }
 
+/**
+ * # HÀM BlockCountry
+ * Hàm trung tâm thực hiện việc khóa toàn bộ một quốc gia.
+ * Thường được gọi bởi GeoHeuristic khi ngưỡng (Threshold) bị phá vỡ.
+ */
 // BlockCountry quét file 22MB (rất nhanh, chỉ tốn 1-2s) để tìm tất cả Subnet của quốc gia
 // và đẩy xuống Go Firewall API (vào LPM Trie).
 func (g *GeoIPMonitor) BlockCountry(isoCode string) {

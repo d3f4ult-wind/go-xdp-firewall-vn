@@ -246,6 +246,10 @@ input:checked + .slider:before { transform: translateX(20px); }
 </div>
 
 <script>
+  /**
+   * Helper hiển thị thông báo ngắn cạnh form.
+   * Dùng chung cho tất cả thao tác cấu hình Tier 1 để tránh lặp code.
+   */
   function showMsg(id, msg, isError=false) {
     const el = document.getElementById(id);
     el.textContent = msg;
@@ -253,6 +257,17 @@ input:checked + .slider:before { transform: translateX(20px); }
     setTimeout(() => el.textContent = "", 3000);
   }
 
+  /**
+   * Ghi cấu hình Tier 1 xuống `mitigation_map`.
+   * Luồng gọi:
+   *   Browser -> Flask `/api/tier1/mitigation`
+   *   -> Go `/tier1/mitigation`
+   *   -> `Firewall.UpdateMitigationMap`
+   *   -> eBPF `mitigation_map` index 0..6.
+   *
+   * Lưu ý bảo vệ:
+   *   Khi admin chỉnh tay, Go Controller tắt Auto Mode để tránh Watcher ghi đè.
+   */
   async function updateMitigation() {
     const data = {
       level: parseInt(document.getElementById("level").value) || 0,
@@ -281,6 +296,11 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Bật/tắt Watcher Auto Mode.
+   * Auto Mode không xử lý packet trực tiếp; nó chỉ quyết định Level rồi cập nhật
+   * `mitigation_map`. Packet path vẫn nằm ở XDP trong `xdp-filter.c`.
+   */
   async function toggleAutoMode() {
     const isAuto = document.getElementById("autoModeToggle").checked;
     try {
@@ -301,6 +321,10 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Đồng bộ trạng thái UI với Go Controller.
+   * `current_level` là state do Watcher giữ trong RAM bằng atomic.Uint32.
+   */
   async function fetchWatcherStatus() {
     try {
       const res = await fetch("/api/tier1/watcher");
@@ -334,6 +358,13 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Profile WRED tĩnh cho lab:
+   *   Level 1: global 25%, geo 5%
+   *   Level 2: global 50%, geo 15%
+   *   Level 3: global 100%, geo 50%
+   * Đây chỉ là gợi ý trên UI; Go Watcher cũng có profile tương tự trong watcher.go.
+   */
   function autoFillWRED() {
     const lvl = parseInt(document.getElementById("level").value);
     if (lvl === 0) {
@@ -367,6 +398,10 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Thêm IP đơn lẻ vào `trusted_map`.
+   * IP trusted bỏ qua Probabilistic Drop ở Tier 1, nhưng vẫn phải qua Tier 2.
+   */
   async function addTrusted() {
     const ip = document.getElementById("trustedIp").value.trim();
     if(!ip) return;
@@ -388,6 +423,10 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Thêm CIDR ưu tiên vào `geo_trust_map`.
+   * Đây không phải whitelist tuyệt đối; nó chỉ dùng tỷ lệ drop thấp hơn ở Tier 1.
+   */
   async function addGeo() {
     const cidr = document.getElementById("geoCidr").value.trim();
     if(!cidr) return;
@@ -409,6 +448,11 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Nạp toàn bộ CIDR của một quốc gia từ MaxMind CSV vào `geo_trust_map`.
+   * Chức năng này tiện cho demo, nhưng khi bảo vệ thực tế cần dùng rất thận trọng
+   * vì CIDR quá rộng có thể tạo false positive khi attacker spoof random source.
+   */
   async function addGeoCountry() {
     const country = document.getElementById("geoCountry").value;
     const msgEl = document.getElementById("geoCountryMsg");
@@ -433,6 +477,10 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Xóa IP khỏi `trusted_map`.
+   * Đây là thao tác rollback khi IP không còn được xem là tin cậy.
+   */
   async function deleteTrusted(ip) {
     if(!confirm("Xóa Trusted IP: " + ip + "?")) return;
     try {
@@ -446,6 +494,9 @@ input:checked + .slider:before { transform: translateX(20px); }
     } catch(e) { alert("Lỗi kết nối"); }
   }
 
+  /**
+   * Xóa một CIDR khỏi `geo_trust_map`.
+   */
   async function deleteGeo(cidr) {
     if(!confirm("Xóa Geo CIDR: " + cidr + "?")) return;
     try {
@@ -459,6 +510,10 @@ input:checked + .slider:before { transform: translateX(20px); }
     } catch(e) { alert("Lỗi kết nối"); }
   }
 
+  /**
+   * Xóa toàn bộ `geo_trust_map`.
+   * Đây là thao tác mạnh, dùng khi cấu hình Geo Priority sai hoặc muốn reset lab.
+   */
   async function clearGeoCountry() {
     if(!confirm("BẠN CÓ CHẮC MUỐN XÓA TOÀN BỘ GEO CIDR KHÔNG? Hành động này không thể hoàn tác!")) return;
     
@@ -479,6 +534,10 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Đọc danh sách trusted IP và geo CIDR để hiển thị.
+   * Go Controller phải iterate BPF maps và chuyển key nhị phân về IP/CIDR readable.
+   */
   async function fetchLists() {
     try {
       const resTrusted = await fetch("/api/tier1/trusted/list");
@@ -518,6 +577,11 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Đọc telemetry từ `mitigation_stats`.
+   * Map này là PERCPU_ARRAY nên Go phải cộng tổng counter của các CPU trước khi
+   * trả JSON cho UI.
+   */
   async function fetchStats() {
     try {
       const res = await fetch("/api/tier1/stats");
@@ -536,6 +600,9 @@ input:checked + .slider:before { transform: translateX(20px); }
     }
   }
 
+  /**
+   * Refresh thủ công để admin kiểm tra ngay sau khi chạy tấn công/demo.
+   */
   function manualRefresh() {
     const btn = document.getElementById("btnRefresh");
     btn.textContent = "Đang tải...";

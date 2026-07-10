@@ -480,6 +480,25 @@ iptables -A FORWARD -i "$IFACE_IN" \
     -j ACCEPT
 
 # 9. ACCEPT default (Tạm thời cho Benchmark Best Case)
+#
+# LEGIT-CANDIDATE DETECTION:
+# Rule này LOG các IP tạo NEW connection thành công (đã qua tất cả filter trên).
+#
+# CHÚ Ý PREFIX QUAN TRỌNG:
+#   LOG_PREFIX = "[FW-DOS] " (khai báo ở đầu script, dòng 50)
+#   String xuất hiện trong kern.log: "[FW-DOS] LEGIT-CANDIDATE SRC=x.x.x.x ..."
+#   KHÔNG phải "[FW-LEGIT-CANDIDATE]" hay prefix riêng.
+#
+# Watcher LegitDetector đọc bằng: strings.Contains(line, "LEGIT-CANDIDATE")
+# Watcher tailAttackLog loại trừ bằng: !strings.Contains(line, "LEGIT-CANDIDATE")
+# → Nhờ vậy đường dọn chính xác giữa attack và legit không bị nhầm.
+iptables -A FORWARD -i "$IFACE_IN" \
+    -p tcp -m multiport --dports 80,443,8080 \
+    -m conntrack --ctstate NEW \
+    -m set ! --match-set "$WHITELIST_SET" src \
+    -j LOG --log-prefix "${LOG_PREFIX}LEGIT-CANDIDATE " --log-level 4
+    # ↑ Kết quả: "[FW-DOS] LEGIT-CANDIDATE SRC=10.10.1.3 DST=10.10.2.2 ..."
+
 iptables -A FORWARD -i "$IFACE_IN" \
     -j LOG --log-prefix "[FW-ALLOW] ACCEPT-DEFAULT " --log-level 4
 iptables -A FORWARD -i "$IFACE_IN" -j ACCEPT

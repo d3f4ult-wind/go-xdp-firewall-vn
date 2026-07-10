@@ -42,3 +42,7 @@ watcher:
   alert_high_watermark: 10     # Tín hiệu Xúc Tác (Accelerator): Số lượng alert / sliding_window
   alert_low_watermark: 2       # Tín hiệu Xúc Tác: Số lượng alert / sliding_window
   conntrack_high_watermark: 50000 # Tín hiệu Cứng: Kích thước bảng conntrack báo hiệu Tường lửa quá tải
+  # Ngưỡng Whitelist Auto-Learning (LegitDetector):
+  # IP phải có legit_count >= 3 lần kết nối hợp lệ (và attack_count = 0) để được promote vào whitelist.
+  # Hoặc: Suricata xác nhận hợp lệ 1 lần (sid:9900001) và không có attack alert.
+  legit_promote_threshold: 3

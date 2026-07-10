@@ -7,7 +7,12 @@
  *   2. Gọi mã máy từ file .o đã nhúng để nạp vào Kernel thông qua Syscall.
  *   3. Lựa chọn chế độ đính kèm (Native vs Generic/SKB).
  *   4. Tạo một "Link" để duy trì sự tồn tại của chương trình trên Interface.
- * CẢI TIẾN/VERSION: v1.0 - Hỗ trợ tự động fallback sang Generic mode nếu Driver không hỗ trợ.
+ * GHI CHÚ TRIỂN KHAI:
+ *   - `mode=native` ép chạy XDP Driver Mode.
+ *   - `mode=skb` ép chạy Generic/SKB Mode.
+ *   - Các giá trị khác, bao gồm `auto` trong init.yaml hiện tại, sẽ rơi về Generic Mode.
+ *     Đây là lựa chọn an toàn cho lab VirtualBox, nhưng chưa phải cơ chế auto-fallback
+ *     đúng nghĩa kiểu "thử Native trước, lỗi thì lùi về Generic".
  * =================================================================================
  */
 
@@ -15,11 +20,12 @@ package bpf
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
-	"log"
-	"github.com/cilium/ebpf/link"
+
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 )
 
 // BPF đóng vai trò là một "Handle" duy nhất để quản lý toàn bộ tài nguyên eBPF.
@@ -88,6 +94,8 @@ func LoadAndAttach(ifaceName string, mode string) (*BPF, error) {
 		// Nhược điểm: Chậm hơn Native vì Kernel phải tốn công tạo struct sk_buff trước.
 		flags = link.XDPGenericMode
 	default:
+		// LƯU Ý: `auto` hiện đi vào nhánh này. Nếu muốn auto-fallback thật,
+		// cần thử AttachXDP với XDPDriverMode trước, nếu lỗi thì retry bằng XDPGenericMode.
 		flags = link.XDPGenericMode
 	}
 

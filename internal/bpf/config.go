@@ -38,7 +38,13 @@ type WatcherConfig struct {
 	AlertHighWatermark     int    `yaml:"alert_high_watermark"`
 	AlertLowWatermark      int    `yaml:"alert_low_watermark"`
 	ConntrackHighWatermark int    `yaml:"conntrack_high_watermark"`
+	// LegitPromoteThreshold: số lần kết nối hợp lệ cần thiết để promote IP vào whitelist.
+	// Mặc định 3 nếu không set. IP phải có legit_count >= threshold VÀ attack_count == 0.
+	// Giá trị thấp → whitelist nhanh hơn nhưng có thể không chính xác.
+	// Giá trị cao → an toàn hơn nhưng cần nhiều lần kết nối trước khi được whitelist.
+	LegitPromoteThreshold int `yaml:"legit_promote_threshold"`
 }
+
 
 /**
  * # Hàm LoadConfig

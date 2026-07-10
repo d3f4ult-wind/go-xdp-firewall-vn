@@ -1,3 +1,18 @@
+/**
+ * =================================================================================
+ * FILE: unban.go
+ * MÔ TẢ: Tiến trình ngầm tự động dọn dẹp các IP đã bị chặn khỏi sổ đen.
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Chạy một vòng lặp quét đếm ngược (Ticker).
+ *   2. Duyệt toàn bộ các entry đang nằm trong `auto_block_map` của Kernel.
+ *   3. Kiểm tra Timestamp lúc bắt đầu block. Nếu quá hạn (Ban Duration) -> Xóa khỏi Map.
+ * TẠI SAO CẦN UNBAN:
+ *   - Các đợt DDoS thường chỉ diễn ra theo đợt (Wave).
+ *   - Rất có thể các IP bị tấn công là IP botnet hoặc IP người dùng bị spoofing.
+ *   - Nếu block vĩnh viễn, map sẽ đầy (đạt giới hạn Max Entries) và gây tắc nghẽn dịch vụ.
+ * =================================================================================
+ */
+
 package main
 
 import (
@@ -29,6 +44,12 @@ func (s *UnbanService) Start() {
 	}
 }
 
+/**
+ * # HÀM sweep (Quét dọn)
+ * Khởi tạo Iterator duyệt qua Kernel Map (eBPF). 
+ * CẠM BẪY: Việc duyệt qua BPF Map có chi phí (cost) khá cao so với Map thường trên RAM.
+ * Do đó, tần suất quét (checkInterval) không nên quá nhỏ.
+ */
 func (s *UnbanService) sweep() {
 	now := uint64(time.Now().Unix())
 	

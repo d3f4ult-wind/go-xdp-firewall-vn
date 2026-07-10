@@ -121,6 +121,11 @@ th, td {
  */
 const api = "";
 
+/**
+ * Đọc cấu hình rate limit hiện tại từ Flask proxy.
+ * Flask sẽ gọi tiếp Go API `/ratelimit/config`, Go đọc `rl_config_map`
+ * index 0 (PPS threshold) và index 1 (time window).
+ */
 function loadRateLimitConfig() {
   fetch(api + "/ratelimit/config")
     .then(r => r.json())
@@ -131,6 +136,13 @@ function loadRateLimitConfig() {
     .catch(err => console.error("Failed to load rate limit config", err));
 }
 
+/**
+ * Ghi cấu hình rate limit mới xuống kernel map.
+ * Luồng gọi:
+ *   Browser -> Flask `/ratelimit/config` -> Go `/ratelimit/config`
+ *   -> `Firewall.SetRateLimitThreshold/SetRateLimitWindow`
+ *   -> eBPF `rl_config_map`.
+ */
 function saveRateLimitConfig() {
   const pps = Number(document.getElementById("rlPps").value);
   const win = Number(document.getElementById("rlWindow").value);
@@ -163,6 +175,11 @@ function saveRateLimitConfig() {
   });
 }
 
+/**
+ * Hiển thị những IP đang vượt ngưỡng Fixed Window Counter.
+ * Go phải cộng các giá trị per-CPU trong `rate_limit_map`, vì map ở XDP là
+ * BPF_MAP_TYPE_LRU_PERCPU_HASH để giảm tranh chấp giữa nhiều CPU.
+ */
 function loadRateLimitIPs() {
   fetch(api + "/ratelimit/ips")
     .then(r => r.json())
@@ -190,6 +207,11 @@ function loadRateLimitIPs() {
     .catch(err => console.error("Failed to load rate limited IPs", err));
 }
 
+/**
+ * Hiển thị danh sách chặn sớm từ `auto_block_map`.
+ * Nguồn dữ liệu thường đến từ Watcher đọc log Suricata/Iptables hoặc GeoIP
+ * heuristic, khác với rate-limit vốn do XDP tự đếm theo từng IP.
+ */
 function loadAutoBlockedIPs() {
   fetch(api + "/autoblock/ips")
     .then(r => r.json())
@@ -226,6 +248,10 @@ function loadAutoBlockedIPs() {
     .catch(err => console.error("Failed to load auto-blocked IPs", err));
 }
 
+/**
+ * Gỡ một IP/CIDR khỏi `auto_block_map` trước khi hết TTL tự động.
+ * Đây là đường rollback thủ công khi admin phát hiện false positive.
+ */
 function unbanThreatIntel(cidr) {
   if (!confirm(`Bạn có chắc chắn muốn gỡ bỏ ${cidr} khỏi danh sách đen không?`)) return;
   

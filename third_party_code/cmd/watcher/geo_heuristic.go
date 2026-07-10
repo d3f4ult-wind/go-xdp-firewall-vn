@@ -1,3 +1,16 @@
+/**
+ * =================================================================================
+ * FILE: geo_heuristic.go
+ * MÔ TẢ: Hệ thống Heuristic tự động khóa một quốc gia (Dynamic Geo-Blocking).
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Nhận các IP bị cảnh báo từ Iptables hoặc Suricata.
+ *   2. Tra cứu cơ sở dữ liệu MaxMind (GeoLite2-Country.mmdb) để tìm mã quốc gia của IP đó.
+ *   3. Sử dụng bộ đếm thời gian thực (Sliding Window) để đếm số IP xấu đến từ mỗi quốc gia.
+ *   4. Nếu trong một khoảng thời gian ngắn (ví dụ 5s), có quá nhiều IP xấu (ví dụ 4 IP)
+ *      từ cùng một quốc gia -> Ra quyết định khóa toàn bộ dải mạng của quốc gia đó.
+ * =================================================================================
+ */
+
 package main
 
 import (
@@ -50,6 +63,11 @@ func NewGeoHeuristic(dbPath string, geoMonitor *GeoIPMonitor) *GeoHeuristic {
 	return gh
 }
 
+/**
+ * # HÀM resetLoop
+ * Tiến trình nền tự động làm sạch (reset) bộ đếm `countryHits` sau mỗi chu kỳ `window`.
+ * Cơ chế này giúp các đợt tấn công nhỏ giọt không bị cộng dồn vĩnh viễn, tránh False Positive.
+ */
 // resetLoop tự động làm sạch bộ đếm sau mỗi khoảng thời gian (window)
 func (gh *GeoHeuristic) resetLoop() {
 	ticker := time.NewTicker(gh.window)
@@ -61,6 +79,11 @@ func (gh *GeoHeuristic) resetLoop() {
 	}
 }
 
+/**
+ * # HÀM ReportBadIP
+ * Nhận một địa chỉ IP có hành vi xấu, tra cứu quốc gia của nó, tăng bộ đếm 
+ * và kiểm tra ngưỡng (Threshold).
+ */
 // ReportBadIP được gọi bởi SuricataTailer hoặc IptablesTailer
 // mỗi khi phát hiện một IP tấn công.
 func (gh *GeoHeuristic) ReportBadIP(ipStr string) {

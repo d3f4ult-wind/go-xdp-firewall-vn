@@ -1,3 +1,13 @@
+/**
+ * =================================================================================
+ * FILE: bpf_manager.go
+ * MÔ TẢ: Cầu nối giao tiếp giữa Watcher Daemon và eBPF Map trong Kernel.
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Mở (load) file đại diện của eBPF Map từ hệ thống file ảo (bpf fs) đã được ghim.
+ *   2. Cung cấp API nội bộ cho phép thêm/xóa các dải IP vào `auto_block_map`.
+ * =================================================================================
+ */
+
 package main
 
 import (
@@ -19,6 +29,13 @@ type BPFManager struct {
 	autoBlockMap *ebpf.Map
 }
 
+/**
+ * # HÀM NewBPFManager
+ * Kết nối tới Map eBPF. 
+ * TẠI SAO PHẢI PIN MAP? Do eBPF Map mặc định sẽ bị xóa khi chương trình tạo ra nó (Firewall chính) tắt.
+ * Pin Map giúp map được lưu lại dưới dạng file trong thư mục /sys/fs/bpf/, cho phép các tiến trình
+ * khác (như Watcher này) có thể đọc và ghi chung vào một bộ nhớ Kernel.
+ */
 func NewBPFManager(pinPath string) (*BPFManager, error) {
 	// Load map đã được ghim từ hệ thống file ảo
 	opts := &ebpf.LoadPinOptions{
@@ -34,11 +51,21 @@ func NewBPFManager(pinPath string) (*BPFManager, error) {
 	}, nil
 }
 
+/**
+ * # HÀM BlockIP
+ * Tiện ích: Chuyển đổi một địa chỉ IP lẻ thành định dạng Subnet (/32) để tương thích 
+ * với cấu trúc LPM (Longest Prefix Match) của eBPF Map.
+ */
 // BlockIP nhận vào một chuỗi IP lẻ (tự động chuyển thành /32)
 func (m *BPFManager) BlockIP(ipStr string) error {
 	return m.BlockSubnet(ipStr + "/32")
 }
 
+/**
+ * # HÀM BlockSubnet
+ * Tính toán và chuyển đổi cấu trúc mạng (CIDR) thành mảng byte thô (Network Byte Order).
+ * Sau đó đẩy xuống Kernel cùng với timestamp hiện tại (để phục vụ Auto-unban sau này).
+ */
 // BlockSubnet nhận vào một dải CIDR (vd: 192.168.1.0/24) và đẩy xuống LPM Trie
 func (m *BPFManager) BlockSubnet(cidr string) error {
 	ipStr, maskStr, err := net.ParseCIDR(cidr)
@@ -77,6 +104,11 @@ func (m *BPFManager) BlockSubnet(cidr string) error {
 	return nil
 }
 
+/**
+ * # HÀM RemoveSubnet
+ * Xóa một entry khỏi danh sách chặn tự động. 
+ * Gọi khi IP đó đã hết hạn khóa chặn (ban duration).
+ */
 // RemoveSubnet xóa Subnet/IP khỏi sổ đen bằng LpmKey
 func (m *BPFManager) RemoveSubnet(key LpmKey) error {
 	err := m.autoBlockMap.Delete(&key)

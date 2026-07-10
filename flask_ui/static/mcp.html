@@ -113,8 +113,15 @@ input[type="text"], input[type="password"] {
 </div>
 
 <script>
+// Lưu lịch sử hội thoại theo định dạng mà Gemini API yêu cầu.
+// Lưu ý bảo mật: bản demo giữ API key và chat history ở trình duyệt, không phù hợp production.
 let chatHistory = [];
 
+/**
+ * Danh sách Function Calling tools mà Gemini nhìn thấy.
+ * Các schema này phải khớp với API Flask/Go bên dưới; nếu đổi REST API mà quên
+ * đổi schema, AI có thể gọi sai tham số hoặc gọi tool không còn tồn tại.
+ */
 const tools = [
   {
     name: "block_ip",
@@ -276,6 +283,10 @@ const tools = [
   }
 ];
 
+/**
+ * Ghi một message vào khung chat.
+ * Hàm này chỉ phục vụ hiển thị, không làm thay đổi trạng thái firewall.
+ */
 function appendMsg(text, sender) {
   const box = document.getElementById("chat-box");
   const div = document.createElement("div");
@@ -286,6 +297,17 @@ function appendMsg(text, sender) {
   return div;
 }
 
+/**
+ * Thực thi tool mà Gemini yêu cầu.
+ * Luồng tổng quát:
+ *   Gemini trả về functionCall -> Web UI hỏi HITL nếu tool nhạy cảm
+ *   -> gọi Flask API -> Flask gọi Go Controller hoặc lệnh hệ thống
+ *   -> kết quả trả ngược vào chatHistory dưới dạng functionResponse.
+ *
+ * Cạm bẫy bảo mật:
+ *   Đây là demo client-side. Production nên đưa lớp tool execution vào backend
+ *   để có RBAC, audit log, rate limit và policy engine tập trung.
+ */
 async function executeTool(name, args) {
   appendMsg(`🔧 Đang thực thi: ${name}(${JSON.stringify(args)})`, "system");
   
@@ -431,6 +453,11 @@ async function executeTool(name, args) {
   }
 }
 
+/**
+ * Vòng điều phối chính của AI Assistant.
+ * Hàm này có thể gọi Gemini nhiều lần: lần đầu để AI quyết định tool, các lần
+ * tiếp theo để AI đọc kết quả tool và trả lời người dùng.
+ */
 async function sendPrompt() {
   const apiKey = document.getElementById("apiKey").value.trim();
   if (!apiKey) {
@@ -494,6 +521,11 @@ async function sendPrompt() {
   }
 }
 
+/**
+ * Gọi Gemini GenerateContent API với functionDeclarations.
+ * Nếu model trả về `functionCall`, caller sẽ không hiển thị ngay mà đi qua
+ * `executeTool()` trước.
+ */
 async function callGemini(apiKey) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   

@@ -1,3 +1,18 @@
+/**
+ * =================================================================================
+ * FILE: suricata_tailer.go
+ * MÔ TẢ: Đọc và phân tích log NIDS từ Suricata.
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Đọc liên tục file eve.json của Suricata (định dạng cấu trúc JSON).
+ *   2. Bắt các sự kiện có `event_type` là "alert".
+ *   3. Trích xuất `src_ip` và gọi XDP khóa chặn ngay ở Tầng 1/2 để bảo vệ hệ thống.
+ * TẠI SAO LẠI KẾT HỢP SURICATA + XDP?
+ *   Suricata rất giỏi trong việc phân tích Payload rác/xấu (DPI) bằng hàng ngàn luật,
+ *   nhưng chặn (Drop) gói tin lại rất chậm. XDP thì siêu tốc nhưng không biết phân tích DPI.
+ *   Sự kết hợp này mang lại sức mạnh "Kiếm hiệp": Suricata là con Mắt, XDP là thanh Kiếm.
+ * =================================================================================
+ */
+
 package main
 
 import (
@@ -24,6 +39,10 @@ func NewSuricataTailer(path string, bpfManager *BPFManager, geoHeuristic *GeoHeu
 	}
 }
 
+/**
+ * # HÀM Start
+ * Vòng lặp vô tận chờ và đọc file eve.json.
+ */
 func (t *SuricataTailer) Start() {
 	fmt.Printf("[Suricata] Dang doi doc file: %s\n", t.filePath)
 	
@@ -67,6 +86,11 @@ type EveLog struct {
 	SrcIP     string `json:"src_ip"`
 }
 
+/**
+ * # HÀM processLine
+ * Cố gắng giải mã chuỗi text thành cấu trúc JSON. Nếu là một "Alert" (cảnh báo nguy hiểm),
+ * lập tức chuyển IP đó cho BPFManager khóa chặn.
+ */
 func (t *SuricataTailer) processLine(line string) {
 	var eve EveLog
 	err := json.Unmarshal([]byte(line), &eve)

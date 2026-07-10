@@ -1,3 +1,15 @@
+/**
+ * =================================================================================
+ * FILE: iptables_tailer.go
+ * MÔ TẢ: Đọc và phân tích log của Iptables (thông qua Syslog/Kernlog).
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Mở file log (ví dụ: /var/log/syslog) và đọc liên tục các dòng mới xuất hiện.
+ *   2. Sử dụng Regex để tìm các dòng có tiền tố [FW-DOS] (do iptables.rules sinh ra).
+ *   3. Trích xuất địa chỉ IP nguồn (SRC=...) và ra lệnh khóa chặn (Block) trên XDP.
+ *   4. Báo cáo IP này cho Heuristic Engine để phục vụ tính năng Geo-Blocking.
+ * =================================================================================
+ */
+
 package main
 
 import (
@@ -31,6 +43,12 @@ func NewIptablesTailer(path string, bpfManager *BPFManager, geoHeuristic *GeoHeu
 	}
 }
 
+/**
+ * # HÀM Start
+ * Vòng lặp vô tận (Infinite Loop) chờ và đọc file log.
+ * Tương tự lệnh `tail -f`, nếu đọc đến cuối file (EOF), tiến trình sẽ ngủ một chút
+ * để tránh tiêu thụ 100% CPU.
+ */
 func (t *IptablesTailer) Start() {
 	fmt.Printf("[Iptables] Dang doi doc file log: %s\n", t.filePath)
 	
@@ -66,6 +84,11 @@ func (t *IptablesTailer) Start() {
 	}
 }
 
+/**
+ * # HÀM processLine
+ * Xử lý từng dòng text thô. Regex chỉ được thực thi NẾU chuỗi chứa keyword "[FW-DOS]",
+ * giúp tối ưu hóa hiệu năng cực lớn trong môi trường có hàng ngàn dòng log mỗi giây.
+ */
 func (t *IptablesTailer) processLine(line string) {
 	// Dựa vào file iptables.rules của bạn, bạn đang sử dụng tiền tố "--log-prefix '[FW-DOS]'"
 	// Chúng ta chỉ phân tích các dòng có chứa tiền tố này để tiết kiệm CPU

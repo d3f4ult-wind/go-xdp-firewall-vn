@@ -1,3 +1,20 @@
+/**
+ * =================================================================================
+ * FILE: main.go
+ * MÔ TẢ: Điểm khởi đầu (Entry point) của Watcher Daemon độc lập.
+ * LUỒNG HOẠT ĐỘNG:
+ *   1. Kết nối với eBPF Map `auto_block_map` đã được ghim sẵn bởi Control Plane chính.
+ *   2. Khởi tạo và chạy song song các tiến trình:
+ *      - Đọc log Suricata (NIDS) và Iptables (Log rules).
+ *      - Quản lý khóa dải IP theo quốc gia (GeoIP) kết hợp Heuristic.
+ *      - Tiến trình quét định kỳ để tự động mở khóa (Auto-unban) các IP đã hết hạn.
+ * TẠI SAO LẠI TÁCH RỜI KHỎI CONTROL PLANE CHÍNH?
+ *   - Giúp module này hoạt động độc lập, có thể bảo trì, nâng cấp, hoặc thay thế 
+ *     bằng các công nghệ đọc log khác (như Filebeat/Logstash) mà không cần biên dịch 
+ *     lại lõi Firewall (Go Controller).
+ * =================================================================================
+ */
+
 package main
 
 import (
@@ -8,6 +25,11 @@ import (
 	"syscall"
 )
 
+/**
+ * # HÀM main
+ * Quản lý vòng đời của Watcher Daemon. Khởi tạo tất cả các thành phần và chặn luồng 
+ * chờ tín hiệu tắt (Ctrl+C).
+ */
 func main() {
 	fmt.Println("[*] XDP Watcher (Management Daemon) is starting...")
 
